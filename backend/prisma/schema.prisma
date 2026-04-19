@@ -1,0 +1,116 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [postgis]
+}
+
+model users {
+  id         String   @id @default(uuid())
+  full_name  String
+  address    String?
+  email      String   @unique
+  citizen_id String   @unique
+  created_at DateTime @default(now())
+
+  devices devices[]
+}
+
+model devices {
+  id            String    @id @default(uuid())
+  user_id       String
+  phone_number  String    @unique
+  model         String?
+  type          String?
+  device_os     String?
+  last_seen     DateTime?
+  registered_at DateTime  @default(now())
+
+  user users @relation(fields: [user_id], references: [id])
+
+  location_history   location_history[]
+  cell_tower_history cell_tower_history[]
+
+  @@index([user_id])
+}
+
+model location_history {
+  id        String  @id @default(uuid())
+  device_id String
+
+  latitude  Decimal @db.Decimal(10, 8)
+  longitude Decimal @db.Decimal(11, 8)
+
+  geom Unsupported("geometry(Point,4326)")?
+
+  district    String?
+  recorded_at DateTime
+
+  device devices @relation(fields: [device_id], references: [id])
+
+  @@index([device_id, recorded_at])
+}
+
+model cell_tower_history {
+  id        String @id @default(uuid())
+  device_id String
+
+  mcc Int?
+  mnc Int?
+  lac Int?
+  cid Int?
+
+  pci        Int?
+  type       String?
+  is_serving Boolean @default(false)
+
+  rssi       Int?
+  signal_dbm Int?
+
+  recorded_at DateTime
+
+  device devices @relation(fields: [device_id], references: [id])
+
+  @@index([device_id, recorded_at])
+}
+
+model bts_stations {
+  id      Int     @id @default(autoincrement())
+  mcc     Int
+  mnc     Int
+  lac     Int
+  cid     Int
+  lat     Decimal @db.Decimal(10, 8)
+  lon     Decimal @db.Decimal(11, 8)
+  geom    Unsupported("geometry(Point,4326)")?
+  radio   String?
+  range   Int?
+  address String?
+  created_at DateTime @default(now()) @db.Timestamp(3)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(3)
+
+  @@unique([mcc, mnc, lac, cid])
+  @@index([mcc, mnc, lac, cid])
+}
+
+model bts_raw {
+  radio    String?
+  mcc      Int?
+  mnc      Int?
+  lac      Int?
+  cid      BigInt?
+  psc      Int?
+  lon      Float?
+  lat      Float?
+  range    Int?
+  rssi     Int?
+  status   Int?
+  ts1      BigInt?
+  ts2      BigInt?
+  reserved Int?
+
+  @@ignore
+}
