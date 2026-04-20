@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, { cors: { origin: '*' } });
+  app.enableShutdownHooks();
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -24,7 +25,7 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
 
   const port = Number(process.env.PORT) || 3001;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   logger.log(`HTTP server listening on :${port} (docs: /docs)`);
 }
 
