@@ -18,8 +18,8 @@ import DeviceMarker, { type BtsMapStation } from "./DeviceMarker";
 
 const MOVE_DEBOUNCE_MS = 300;
 const HANOI_CENTER: [number, number] = [21.0285, 105.8542];
-const CARTO_LIGHT_TILES =
-  "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+const CARTO_VOYAGER_TILES =
+  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 
 function FlyToDevice({ device }: { device: Device }) {
   const map = useMap();
@@ -166,9 +166,10 @@ export default function MapView({
       zoomControl={false}
     >
       <TileLayer
-        url={CARTO_LIGHT_TILES}
+        url={CARTO_VOYAGER_TILES}
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
         maxZoom={19}
+        subdomains="abcd"
       />
       <ZoomControl position="bottomright" />
       <InvalidateOnResize />
