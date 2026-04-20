@@ -49,3 +49,7 @@ coverage/
 # Prisma
 **/prisma/*.db
 **/prisma/*.db-journal
+
+# Internal specs
+SPEC.md
+
