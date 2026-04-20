@@ -1,0 +1,399 @@
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  type AppStateStatus,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { TRACKING_INTERVAL_MS } from '../config/api';
+import { useDeviceInfo } from '../hooks/useDeviceInfo';
+import { useLocation } from '../hooks/useLocation';
+import type { CellTower, DeviceMovedEvent, IngestPayload } from '../models/types';
+import { sendIngestData } from '../services/apiService';
+import { getCellTowerInfo, isUsingMockCellInfo } from '../services/cellInfoService';
+import {
+  connectMqtt,
+  disconnectMqtt,
+  onMqttConnectionChange,
+  publishTelemetry,
+} from '../services/mqttService';
+import { onDeviceMoved } from '../services/socketService';
+
+const MAX_EVENTS = 10;
+
+export default function TrackingScreen() {
+  const { storedData } = useDeviceInfo();
+  const {
+    location,
+    error: locationError,
+    hasPermission,
+    isWatching,
+    requestPermission,
+    startWatching,
+    stopWatching,
+    refreshLocation,
+  } = useLocation();
+
+  const [isActive, setIsActive] = useState(false);
+  const [cellTowers, setCellTowers] = useState<CellTower[]>([]);
+  const [lastSentAt, setLastSentAt] = useState<Date | null>(null);
+  const [sendCount, setSendCount] = useState(0);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [mqttConnected, setMqttConnected] = useState(false);
+  const [realtimeEvents, setRealtimeEvents] = useState<DeviceMovedEvent[]>([]);
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
+  const fetchCellTowers = useCallback(async (): Promise<CellTower[]> => {
+    const towers = await getCellTowerInfo();
+    setCellTowers(towers);
+    return towers;
+  }, []);
+
+  const sendTelemetry = useCallback(async () => {
+    if (!storedData?.deviceId) return;
+    setSending(true);
+
+    try {
+      const current = await refreshLocation();
+      if (!current) {
+        setSendError('Không lấy được vị trí');
+        return;
+      }
+
+      const towers = await fetchCellTowers();
+      const payload: IngestPayload = { location: current, cellTowers: towers };
+
+      const sentOverMqtt = await publishTelemetry(storedData.deviceId, payload);
+      if (!sentOverMqtt) {
+        await sendIngestData(storedData.deviceId, payload);
+      }
+
+      setLastSentAt(new Date());
+      setSendCount((n) => n + 1);
+      setSendError(null);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Lỗi gửi dữ liệu');
+    } finally {
+      setSending(false);
+    }
+  }, [storedData, refreshLocation, fetchCellTowers]);
+
+  const startTracking = useCallback(async () => {
+    if (!storedData?.deviceId) {
+      Alert.alert('Chưa đăng ký', 'Vui lòng đăng ký thiết bị trước khi theo dõi.');
+      return;
+    }
+
+    const granted = hasPermission || (await requestPermission());
+    if (!granted) {
+      Alert.alert('Chưa cấp quyền', 'Vui lòng cấp quyền truy cập vị trí.');
+      return;
+    }
+
+    connectMqtt(storedData.deviceId);
+    const watching = await startWatching();
+    if (!watching) return;
+
+    setIsActive(true);
+    setSendError(null);
+
+    // Fire once immediately so the user sees progress without waiting 30 s.
+    await sendTelemetry();
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      void sendTelemetry();
+    }, TRACKING_INTERVAL_MS);
+  }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry]);
+
+  const stopTracking = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    stopWatching();
+    disconnectMqtt();
+    setIsActive(false);
+  }, [stopWatching]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!storedData?.deviceId) return;
+      const unsubscribe = onDeviceMoved((event) => {
+        if (event.deviceId !== storedData.deviceId) return;
+        setRealtimeEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS));
+      });
+      return unsubscribe;
+    }, [storedData]),
+  );
+
+  useEffect(() => onMqttConnectionChange(setMqttConnected), []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = appStateRef.current;
+      appStateRef.current = next;
+      if (isActive && prev.match(/inactive|background/) && next === 'active') {
+        void sendTelemetry();
+      }
+    });
+    return () => sub.remove();
+  }, [isActive, sendTelemetry]);
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      disconnectMqtt();
+    };
+  }, []);
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.card}>
+        <View style={styles.headerRow}>
+          <Text style={styles.cardTitle}>Trạng thái theo dõi</Text>
+          <View
+            style={[
+              styles.badge,
+              isActive
+                ? styles.badgeActive
+                : locationError
+                  ? styles.badgeError
+                  : styles.badgeIdle,
+            ]}
+          >
+            <Text
+              style={[
+                styles.badgeText,
+                isActive
+                  ? styles.badgeTextActive
+                  : locationError
+                    ? styles.badgeTextError
+                    : styles.badgeTextIdle,
+              ]}
+            >
+              {isActive ? 'Đang theo dõi' : locationError ? 'Lỗi' : 'Tạm dừng'}
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.toggleBtn, isActive ? styles.stopBtn : styles.startBtn]}
+          onPress={isActive ? stopTracking : startTracking}
+          activeOpacity={0.7}
+          disabled={sending && !isActive}
+        >
+          {sending && !isActive ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.toggleText}>
+              {isActive ? 'Dừng theo dõi' : 'Bắt đầu theo dõi'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.statsRow}>
+          <Stat label="Lần gửi" value={String(sendCount)} />
+          <Stat
+            label="Gửi cuối"
+            value={lastSentAt ? lastSentAt.toLocaleTimeString('vi-VN') : '--'}
+          />
+          <Stat label="MQTT" value={mqttConnected ? 'ON' : 'OFF'} />
+          <Stat label="GPS" value={isWatching ? 'ON' : 'OFF'} />
+        </View>
+
+        {(sendError || locationError) && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{sendError || locationError}</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Vị trí GPS</Text>
+        {location ? (
+          <>
+            <Coord label="Latitude" value={location.latitude.toFixed(6)} />
+            <Coord label="Longitude" value={location.longitude.toFixed(6)} />
+          </>
+        ) : (
+          <Text style={styles.placeholder}>
+            Chưa có dữ liệu vị trí. Bật theo dõi để bắt đầu.
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Trạm BTS ({cellTowers.length})</Text>
+      </View>
+      {isUsingMockCellInfo() && cellTowers.length > 0 && (
+        <Text style={styles.mockNotice}>
+          Đang chạy trên Expo Go — dùng dữ liệu BTS mẫu. Chạy `expo prebuild` +
+          `expo run:android` để đọc dữ liệu thật.
+        </Text>
+      )}
+      {cellTowers.length > 0 ? (
+        cellTowers.map((tower, idx) => (
+          <CellTowerRow key={`${tower.cid}-${idx}`} tower={tower} />
+        ))
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.placeholder}>Chưa phát hiện trạm BTS nào.</Text>
+        </View>
+      )}
+
+      {realtimeEvents.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Sự kiện realtime</Text>
+          {realtimeEvents.map((event, idx) => (
+            <View key={`${event.timestamp}-${idx}`} style={styles.eventRow}>
+              <Text style={styles.eventTime}>
+                {new Date(event.timestamp).toLocaleTimeString('vi-VN')}
+              </Text>
+              <Text style={styles.eventInfo} numberOfLines={1}>
+                CID {event.cid ?? '--'} · {event.signalDbm ?? '--'} dBm
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function Coord({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.coordRow}>
+      <Text style={styles.coordLabel}>{label}</Text>
+      <Text style={styles.coordValue}>{value}</Text>
+    </View>
+  );
+}
+
+function CellTowerRow({ tower }: { tower: CellTower }) {
+  return (
+    <View style={styles.towerCard}>
+      <View style={styles.towerHeader}>
+        <Text style={styles.towerType}>{tower.type}</Text>
+        <Text style={styles.towerSignal}>{tower.signalDbm} dBm</Text>
+      </View>
+      <View style={styles.towerMeta}>
+        <Text style={styles.towerMetaItem}>CID {tower.cid}</Text>
+        <Text style={styles.towerMetaItem}>LAC {tower.lac}</Text>
+        <Text style={styles.towerMetaItem}>MCC {tower.mcc}</Text>
+        <Text style={styles.towerMetaItem}>MNC {tower.mnc}</Text>
+        {tower.pci != null && <Text style={styles.towerMetaItem}>PCI {tower.pci}</Text>}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F5F5F5' },
+  content: { padding: 16, paddingBottom: 32 },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  cardTitle: { fontSize: 18, fontWeight: '700', color: '#333', marginBottom: 12 },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  badgeActive: { backgroundColor: '#E7F5EC' },
+  badgeIdle: { backgroundColor: '#EEE' },
+  badgeError: { backgroundColor: '#FDECEA' },
+  badgeText: { fontSize: 12, fontWeight: '600' },
+  badgeTextActive: { color: '#2E7D32' },
+  badgeTextIdle: { color: '#757575' },
+  badgeTextError: { color: '#C62828' },
+  toggleBtn: {
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  startBtn: { backgroundColor: '#4CAF50' },
+  stopBtn: { backgroundColor: '#F44336' },
+  toggleText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  stat: { alignItems: 'center', flex: 1 },
+  statValue: { fontSize: 16, fontWeight: '700', color: '#1976D2' },
+  statLabel: { fontSize: 11, color: '#999', marginTop: 2 },
+  errorBox: {
+    backgroundColor: '#FFF5F5',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#F44336',
+  },
+  errorText: { color: '#D32F2F', fontSize: 13 },
+  coordRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  coordLabel: { fontSize: 14, color: '#666' },
+  coordValue: { fontSize: 15, fontWeight: '600', color: '#333', fontVariant: ['tabular-nums'] },
+  placeholder: {
+    color: '#999',
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  sectionHeader: { marginBottom: 12, paddingHorizontal: 4 },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#333' },
+  mockNotice: {
+    fontSize: 12,
+    color: '#8A6D3B',
+    backgroundColor: '#FCF3D7',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 12,
+  },
+  towerCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  towerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  towerType: { fontSize: 13, fontWeight: '700', color: '#1976D2' },
+  towerSignal: { fontSize: 13, color: '#333' },
+  towerMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  towerMetaItem: { fontSize: 11, color: '#666' },
+  eventRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#EEE',
+  },
+  eventTime: { fontSize: 12, color: '#999', width: 80 },
+  eventInfo: { fontSize: 13, color: '#333', flex: 1 },
+});

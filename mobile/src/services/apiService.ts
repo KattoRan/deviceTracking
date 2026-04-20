@@ -1,5 +1,10 @@
 import { API_BASE_URL, API_ENDPOINTS, REQUEST_TIMEOUT_MS } from '../config/api';
-import type { RegisterDeviceRequest, RegisterDeviceResponse } from '../models/types';
+import type {
+  IngestPayload,
+  IngestResponse,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
+} from '../models/types';
 
 export class ApiError extends Error {
   constructor(public readonly status: number | null, message: string) {
@@ -62,5 +67,16 @@ export function registerDevice(
   return request<RegisterDeviceResponse>(API_ENDPOINTS.REGISTER_DEVICE, {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export function sendIngestData(
+  deviceId: string,
+  payload: IngestPayload,
+): Promise<IngestResponse> {
+  return request<IngestResponse>(API_ENDPOINTS.INGEST, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    headers: { 'x-device-id': deviceId },
   });
 }

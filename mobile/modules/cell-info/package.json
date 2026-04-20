@@ -1,0 +1,7 @@
+{
+  "name": "cell-info",
+  "version": "0.1.0",
+  "description": "Local Expo module reading TelephonyManager.getAllCellInfo() on Android",
+  "main": "index.ts",
+  "private": true
+}

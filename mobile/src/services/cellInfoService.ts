@@ -1,0 +1,108 @@
+import { PermissionsAndroid, Platform } from 'react-native';
+import CellInfoModule, { type NativeCellInfo } from '../../modules/cell-info';
+import type { CellTower } from '../models/types';
+
+/**
+ * Returns real cell-tower info from the local `cell-info` Expo Module.
+ *
+ * Availability matrix:
+ *   - Android + dev client / prebuild'd app → real `TelephonyManager` data.
+ *   - Android + Expo Go → native module absent → mock payload.
+ *   - iOS (any) → native stub returns []; Apple does not expose cell info.
+ *
+ * Android needs both `ACCESS_FINE_LOCATION` (requested by expo-location
+ * before tracking starts) and `READ_PHONE_STATE`. We only ask for
+ * READ_PHONE_STATE here because expo-location owns FINE_LOCATION.
+ */
+
+const MOCK_TOWERS: CellTower[] = [
+  {
+    type: 'LTE',
+    mcc: 452,
+    mnc: 2,
+    lac: 12345,
+    cid: 67890,
+    signalDbm: -85,
+    rssi: -75,
+    pci: 123,
+  },
+  {
+    type: 'LTE',
+    mcc: 452,
+    mnc: 2,
+    lac: 12345,
+    cid: 67891,
+    signalDbm: -92,
+    rssi: -82,
+    pci: 456,
+  },
+];
+
+let phoneStateGranted: boolean | null = null;
+
+async function ensurePhoneStatePermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  if (phoneStateGranted === true) return true;
+
+  const already = await PermissionsAndroid.check(
+    PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+  );
+  if (already) {
+    phoneStateGranted = true;
+    return true;
+  }
+
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+    {
+      title: 'Quyền đọc thông tin thiết bị',
+      message: 'Ứng dụng cần quyền này để đọc thông tin trạm BTS đang kết nối.',
+      buttonPositive: 'Đồng ý',
+      buttonNegative: 'Từ chối',
+    },
+  );
+  phoneStateGranted = result === PermissionsAndroid.RESULTS.GRANTED;
+  return phoneStateGranted;
+}
+
+function normalize(raw: NativeCellInfo): CellTower | null {
+  if (!raw.mcc || !raw.mnc || !raw.lac || !raw.cid) return null;
+  if (raw.signalDbm == null) return null;
+  return {
+    type: raw.type,
+    mcc: raw.mcc,
+    mnc: raw.mnc,
+    lac: raw.lac,
+    cid: raw.cid,
+    signalDbm: raw.signalDbm,
+    rssi: raw.rssi ?? undefined,
+    pci: raw.pci ?? undefined,
+  };
+}
+
+export async function getCellTowerInfo(): Promise<CellTower[]> {
+  if (CellInfoModule == null) {
+    // Running under Expo Go / no prebuild.
+    return Platform.OS === 'android' ? MOCK_TOWERS : [];
+  }
+
+  if (Platform.OS === 'android') {
+    const granted = await ensurePhoneStatePermission();
+    if (!granted) return [];
+  }
+
+  try {
+    const raw = await CellInfoModule.getCellInfo();
+    return raw.map(normalize).filter((c): c is CellTower => c !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function isRealCellInfoAvailable(): boolean {
+  return CellInfoModule != null && Platform.OS === 'android';
+}
+
+export function isUsingMockCellInfo(): boolean {
+  return CellInfoModule == null && Platform.OS === 'android';
+}
