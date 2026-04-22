@@ -80,3 +80,7 @@ export function sendIngestData(
     headers: { 'x-device-id': deviceId },
   });
 }
+
+export async function deleteDevice(deviceId: string): Promise<void> {
+  await request<void>(`/api/v1/devices/${deviceId}`, { method: 'DELETE' });
+}

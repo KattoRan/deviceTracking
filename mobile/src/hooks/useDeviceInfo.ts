@@ -1,7 +1,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import type { RegistrationStatus, StoredDeviceData } from '../models/types';
+
+/**
+ * `Device.osName` is unreliable on some Samsung ROMs (returns Build.FINGERPRINT
+ * instead of "Android"). Prefer the platform constant and append the numeric
+ * version from expo-device.
+ */
+function formatOs(): string {
+  const name =
+    Platform.OS === 'android'
+      ? 'Android'
+      : Platform.OS === 'ios'
+        ? 'iOS'
+        : Platform.OS;
+  return Device.osVersion ? `${name} ${Device.osVersion}` : name;
+}
 
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
 
@@ -35,7 +51,7 @@ export function useDeviceInfo(): UseDeviceInfoResult {
     let cancelled = false;
     (async () => {
       const model = Device.modelName ?? Device.deviceName ?? 'Unknown';
-      const os = [Device.osName, Device.osVersion].filter(Boolean).join(' ') || 'Unknown';
+      const os = formatOs();
       const type = await Device.getDeviceTypeAsync();
 
       if (cancelled) return;
