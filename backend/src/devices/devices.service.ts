@@ -123,6 +123,29 @@ export class DevicesService {
     });
   }
 
+  async remove(id: string): Promise<void> {
+    const device = await this.prisma.devices.findUnique({
+      where: { id },
+      select: { id: true, user_id: true },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+
+    // Delete device inside a transaction and drop the owning user if this
+    // was their only registered device. location_history and
+    // cell_tower_history cascade via ON DELETE CASCADE.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.devices.delete({ where: { id } });
+      const remaining = await tx.devices.count({
+        where: { user_id: device.user_id },
+      });
+      if (remaining === 0) {
+        await tx.users.delete({ where: { id: device.user_id } });
+      }
+    });
+
+    this.logger.log(`Deleted device=${id}`);
+  }
+
   async findOne(id: string) {
     const device = await this.prisma.devices.findUnique({
       where: { id },

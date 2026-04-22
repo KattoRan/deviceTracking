@@ -49,7 +49,7 @@ model location_history {
   district    String?
   recorded_at DateTime
 
-  device devices @relation(fields: [device_id], references: [id])
+  device devices @relation(fields: [device_id], references: [id], onDelete: Cascade)
 
   @@index([device_id, recorded_at])
 }
@@ -72,7 +72,7 @@ model cell_tower_history {
 
   recorded_at DateTime
 
-  device devices @relation(fields: [device_id], references: [id])
+  device devices @relation(fields: [device_id], references: [id], onDelete: Cascade)
 
   @@index([device_id, recorded_at])
 }

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -11,6 +12,7 @@ import {
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
@@ -43,5 +45,16 @@ export class DevicesController {
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
   findOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.devicesService.findOne(id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Hủy đăng ký thiết bị (cascade xoá lịch sử; xoá user nếu không còn thiết bị nào khác)',
+  })
+  @ApiNoContentResponse({ description: 'Đã xoá' })
+  @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
+  remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
+    return this.devicesService.remove(id);
   }
 }

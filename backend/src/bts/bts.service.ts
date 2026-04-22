@@ -43,6 +43,13 @@ const UNWIRED_LABS_URL = 'https://us1.unwiredlabs.com/v2/process.php';
 export class BtsService {
   private readonly logger = new Logger(BtsService.name);
 
+  /** Dedup in-flight lookups so concurrent telemetry for the same cell only
+   *  hits UnwiredLabs once — saves quota and avoids unique-constraint races. */
+  private readonly inflight = new Map<
+    string,
+    Promise<Awaited<ReturnType<BtsService['fetchAndInsert']>>>
+  >();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -60,52 +67,64 @@ export class BtsService {
     });
     if (existing) return existing;
 
+    const key = `${mcc}-${mnc}-${lac}-${cid}`;
+    const inflight = this.inflight.get(key);
+    if (inflight) return inflight;
+
+    const promise = this.fetchAndInsert(mcc, mnc, lac, cid, radio).finally(() =>
+      this.inflight.delete(key),
+    );
+    this.inflight.set(key, promise);
+    return promise;
+  }
+
+  private async fetchAndInsert(
+    mcc: number,
+    mnc: number,
+    lac: number,
+    cid: number,
+    radio: string,
+  ) {
     const token = process.env.OPENCELLID_API_KEY;
     if (!token) {
       this.logger.debug('OPENCELLID_API_KEY missing — skip lookup');
       return null;
     }
 
+    let data: UnwiredLabsResponse;
     try {
       const res = await axios.post<UnwiredLabsResponse>(
         UNWIRED_LABS_URL,
         { token, radio, mcc, mnc, cells: [{ lac, cid }], address: 1 },
         { timeout: 8000 },
       );
-      const data = res.data;
-      if (data.status !== 'ok' || data.lat == null || data.lon == null) {
-        this.logger.warn(
-          `UnwiredLabs no fix for ${mcc}-${mnc}-${lac}-${cid}: ${data.message ?? 'no data'}`,
-        );
-        return null;
-      }
-
-      // The `set_geom` trigger auto-populates `geom` from lat/lon on INSERT.
-      await this.prisma.bts_stations.upsert({
-        where: { mcc_mnc_lac_cid: { mcc, mnc, lac, cid } },
-        create: {
-          mcc,
-          mnc,
-          lac,
-          cid,
-          lat: data.lat,
-          lon: data.lon,
-          radio,
-          range: data.accuracy ?? data.range ?? 0,
-          address: data.address ?? null,
-        },
-        update: {},
-      });
-
-      return this.prisma.bts_stations.findUnique({
-        where: { mcc_mnc_lac_cid: { mcc, mnc, lac, cid } },
-      });
+      data = res.data;
     } catch (err) {
-      this.logger.error(
-        `UnwiredLabs error ${mcc}-${mnc}-${lac}-${cid}: ${err instanceof Error ? err.message : String(err)}`,
+      this.logger.warn(
+        `UnwiredLabs request ${mcc}-${mnc}-${lac}-${cid} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }
+
+    if (data.status !== 'ok' || data.lat == null || data.lon == null) {
+      this.logger.warn(
+        `UnwiredLabs no fix for ${mcc}-${mnc}-${lac}-${cid}: ${data.message ?? 'no data'}`,
+      );
+      return null;
+    }
+
+    // The `set_geom` trigger auto-populates `geom` from lat/lon on INSERT.
+    // Raw SQL with ON CONFLICT is atomic — Prisma's upsert isn't and races
+    // with other queue workers reading the same cell.
+    await this.prisma.$executeRaw`
+      INSERT INTO bts_stations (mcc, mnc, lac, cid, lat, lon, radio, range, address)
+      VALUES (${mcc}, ${mnc}, ${lac}, ${cid}, ${data.lat}, ${data.lon}, ${radio}, ${data.accuracy ?? data.range ?? 0}, ${data.address ?? null})
+      ON CONFLICT (mcc, mnc, lac, cid) DO NOTHING;
+    `;
+
+    return this.prisma.bts_stations.findUnique({
+      where: { mcc_mnc_lac_cid: { mcc, mnc, lac, cid } },
+    });
   }
 
   async getForMap(query: MapQueryDto) {
