@@ -1,0 +1,64 @@
+name: devicetracking
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    container_name: devicetracking-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: devicetracking-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: devicetracking-mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883" # MQTT TCP (backend)
+      - "9001:9001" # MQTT over WebSocket (mobile)
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+# Volume names pin to docker volume identifiers so renaming the compose
+# project (e.g. cloning the repo into a different dir) does not churn
+# data. The `backend_*` names are kept to reuse volumes created by the
+# original iotTracking setup.
+volumes:
+  postgres_data:
+    name: backend_postgres_data
+    external: true
+  mosquitto_data:
+    name: backend_mosquitto_data
+    external: true
+  mosquitto_log:
+    name: backend_mosquitto_log
+    external: true
+  redis_data:
+    name: devicetracking_redis_data
