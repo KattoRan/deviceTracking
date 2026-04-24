@@ -40,6 +40,11 @@ const TrackingIntervalControl = dynamic(
   { ssr: false },
 );
 
+const FloatingNav = dynamic(
+  () => import("@/components/tracking/FloatingNav"),
+  { ssr: false },
+);
+
 export default function TrackingPage() {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const isTablet = useMediaQuery("(min-width: 768px) and (max-width: 1023px)");
@@ -149,6 +154,8 @@ export default function TrackingPage() {
             <Menu className="h-5 w-5" />
           </button>
         )}
+
+        <FloatingNav />
 
         <MapView
           devices={mappableDevices}

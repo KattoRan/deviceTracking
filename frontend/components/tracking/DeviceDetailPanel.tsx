@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import {
+  Calendar,
   Clock,
   Loader2,
   Mail,
@@ -10,6 +11,7 @@ import {
   Radio,
   Signal,
   Smartphone,
+  Tag,
   User,
   X,
   type LucideIcon,
@@ -67,6 +69,27 @@ function formatDateTime(iso: string | null | undefined): string {
 
 function formatCoord(val: number | null | undefined): string {
   return val == null ? "--" : val.toFixed(6);
+}
+
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function formatDistance(m: number | null): string {
+  if (m == null) return "--";
+  return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m} m`;
 }
 
 export default function DeviceDetailPanel({
@@ -226,46 +249,71 @@ export default function DeviceDetailPanel({
             </div>
             <div className="p-4">
               <SectionHeader icon={MapPin} title="Tọa độ" />
-              <p className="font-mono text-sm text-slate-900">
+              <p className="font-mono text-sm font-medium text-slate-900">
                 {formatCoord(detail?.location?.latitude ?? device.latitude)}
               </p>
-              <p className="font-mono text-sm text-slate-600">
+              <p className="font-mono text-sm font-medium text-slate-900">
                 {formatCoord(detail?.location?.longitude ?? device.longitude)}
               </p>
-              {(detail?.location?.district || device.district) && (
-                <p className="mt-1 text-[11px] text-slate-500">
-                  {detail?.location?.district || device.district}
-                </p>
-              )}
             </div>
           </div>
 
-          {detail?.bts && (
-            <Section icon={Radio} title="Trạm BTS đang phục vụ">
-              <div className="space-y-2 text-xs text-slate-600">
-                <Row label="ID" value={`#${detail.bts.id}`} />
-                <Row label="Công nghệ" value={detail.bts.radio || "--"} />
-                <Row
-                  label="Bán kính phủ"
-                  value={
-                    detail.bts.range != null
-                      ? `${(detail.bts.range / 1000).toFixed(1)} km`
-                      : "--"
-                  }
-                />
-                <Row
-                  label="Khoảng cách"
-                  value={
-                    detail.bts.distance_m != null
-                      ? detail.bts.distance_m >= 1000
-                        ? `${(detail.bts.distance_m / 1000).toFixed(2)} km`
-                        : `${detail.bts.distance_m} m`
-                      : "--"
-                  }
-                />
-              </div>
-            </Section>
-          )}
+          {(() => {
+            // Prefer the live socket-pushed BTS so this card updates in
+            // realtime. Fall back to the one-shot detail payload for fields
+            // the socket doesn't carry (e.g. when telemetry hasn't arrived
+            // since the panel opened).
+            const live = device.connectedBts;
+            const btsId = live?.id ?? detail?.bts?.id ?? null;
+            if (btsId == null) return null;
+            const radio = live?.radio ?? detail?.bts?.radio ?? null;
+            const range = live?.range ?? detail?.bts?.range ?? null;
+
+            const lat = device.latitude ?? detail?.location?.latitude ?? null;
+            const lon = device.longitude ?? detail?.location?.longitude ?? null;
+            const bLat = live?.lat ?? detail?.bts?.latitude ?? null;
+            const bLon = live?.lon ?? detail?.bts?.longitude ?? null;
+            const distanceM =
+              lat != null && lon != null && bLat != null && bLon != null
+                ? haversineMeters(lat, lon, bLat, bLon)
+                : (detail?.bts?.distance_m ?? null);
+
+            return (
+              <Section icon={Radio} title="Trạm BTS đang phục vụ">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-100 text-blue-600">
+                        <Radio className="h-3.5 w-3.5" />
+                      </div>
+                      <span className="text-sm font-semibold text-slate-900">
+                        #{btsId}
+                      </span>
+                    </div>
+                    {radio && (
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                        {radio}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] text-slate-500">Bán kính phủ</p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {range != null ? `${(range / 1000).toFixed(1)} km` : "--"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500">Khoảng cách</p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {formatDistance(distanceM)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </Section>
+            );
+          })()}
 
           <Section icon={User} title="Thông tin thiết bị">
             <div className="space-y-2.5">
@@ -289,8 +337,13 @@ export default function DeviceDetailPanel({
                     .join(" · ") || "--"
                 }
               />
-              <Row label="Loại" value={detail?.type || device.type || "--"} />
               <Row
+                icon={Tag}
+                label="Loại"
+                value={detail?.type || device.type || "--"}
+              />
+              <Row
+                icon={Calendar}
                 label="Ngày đăng ký"
                 value={
                   detail?.registered_at
