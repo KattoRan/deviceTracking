@@ -11,6 +11,8 @@ export interface NativeCellInfo {
   pci: number | null;
   rssi: number | null;
   signalDbm: number | null;
+  /** `CellInfo.isRegistered` — true iff the modem is registered on this cell. */
+  isRegistered: boolean;
 }
 
 interface CellInfoNativeModule {

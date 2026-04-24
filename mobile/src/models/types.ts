@@ -40,6 +40,12 @@ export interface CellTower {
   signalDbm: number;
   rssi?: number;
   pci?: number;
+  /**
+   * From Android `CellInfo.isRegistered`. When available, the backend uses
+   * this as the primary signal for choosing the serving cell instead of
+   * guessing from signal strength.
+   */
+  isRegistered?: boolean;
 }
 
 export interface IngestPayload {
@@ -74,6 +80,35 @@ export interface DeviceMovedEvent {
   timestamp: string;
   cellTowers: CellTowerInfoRealtime[];
   connectedBts: ConnectedBts | null;
+}
+
+export type CommandName =
+  | 'request_location_now'
+  | 'ring_alarm'
+  | 'toggle_tracking'
+  | 'lock_device';
+
+export interface CommandDispatchEvent {
+  commandId: string;
+  command: CommandName;
+  payload: Record<string, unknown>;
+}
+
+export interface TrackingIntervalChangedEvent {
+  intervalSec: number;
+  updatedAt: string;
+}
+
+export interface CommandResultBody {
+  commandId: string;
+  success: boolean;
+  error?: string | null;
+  data?: Record<string, unknown>;
+}
+
+export interface TrackingIntervalResponse {
+  intervalSec: number;
+  updatedAt: string;
 }
 
 export type RootStackParamList = {

@@ -11,11 +11,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { TRACKING_INTERVAL_MS } from '../config/api';
+import { DEFAULT_TRACKING_INTERVAL_MS } from '../config/api';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { useLocation } from '../hooks/useLocation';
-import type { CellTower, DeviceMovedEvent, IngestPayload } from '../models/types';
-import { sendIngestData } from '../services/apiService';
+import type {
+  CellTower,
+  CommandDispatchEvent,
+  DeviceMovedEvent,
+  IngestPayload,
+} from '../models/types';
+import { fetchTrackingInterval, sendIngestData } from '../services/apiService';
 import { getCellTowerInfo, isUsingMockCellInfo } from '../services/cellInfoService';
 import {
   connectMqtt,
@@ -23,7 +28,13 @@ import {
   onMqttConnectionChange,
   publishTelemetry,
 } from '../services/mqttService';
-import { onDeviceMoved } from '../services/socketService';
+import {
+  ackCommand,
+  onCommand,
+  onDeviceMoved,
+  onTrackingIntervalChanged,
+  sendCommandResult,
+} from '../services/socketService';
 
 const MAX_EVENTS = 10;
 
@@ -48,9 +59,14 @@ export default function TrackingScreen() {
   const [sending, setSending] = useState(false);
   const [mqttConnected, setMqttConnected] = useState(false);
   const [realtimeEvents, setRealtimeEvents] = useState<DeviceMovedEvent[]>([]);
+  const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_TRACKING_INTERVAL_MS);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const isActiveRef = useRef(false);
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
 
   const fetchCellTowers = useCallback(async (): Promise<CellTower[]> => {
     const towers = await getCellTowerInfo();
@@ -59,14 +75,14 @@ export default function TrackingScreen() {
   }, []);
 
   const sendTelemetry = useCallback(async () => {
-    if (!storedData?.deviceId) return;
+    if (!storedData?.deviceId) return null;
     setSending(true);
 
     try {
       const current = await refreshLocation();
       if (!current) {
         setSendError('Không lấy được vị trí');
-        return;
+        return null;
       }
 
       const towers = await fetchCellTowers();
@@ -80,8 +96,10 @@ export default function TrackingScreen() {
       setLastSentAt(new Date());
       setSendCount((n) => n + 1);
       setSendError(null);
+      return current;
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Lỗi gửi dữ liệu');
+      return null;
     } finally {
       setSending(false);
     }
@@ -90,29 +108,25 @@ export default function TrackingScreen() {
   const startTracking = useCallback(async () => {
     if (!storedData?.deviceId) {
       Alert.alert('Chưa đăng ký', 'Vui lòng đăng ký thiết bị trước khi theo dõi.');
-      return;
+      return false;
     }
 
     const granted = hasPermission || (await requestPermission());
     if (!granted) {
       Alert.alert('Chưa cấp quyền', 'Vui lòng cấp quyền truy cập vị trí.');
-      return;
+      return false;
     }
 
     connectMqtt(storedData.deviceId);
     const watching = await startWatching();
-    if (!watching) return;
+    if (!watching) return false;
 
     setIsActive(true);
     setSendError(null);
 
-    // Fire once immediately so the user sees progress without waiting 30 s.
+    // Fire once immediately so the user sees progress without waiting a cycle.
     await sendTelemetry();
-
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(() => {
-      void sendTelemetry();
-    }, TRACKING_INTERVAL_MS);
+    return true;
   }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry]);
 
   const stopTracking = useCallback(() => {
@@ -124,6 +138,97 @@ export default function TrackingScreen() {
     disconnectMqtt();
     setIsActive(false);
   }, [stopWatching]);
+
+  // (Re)create the periodic timer whenever isActive flips or the global
+  // interval changes — this is how the remote `tracking_interval_changed`
+  // broadcast actually takes effect on an already-running tracker.
+  useEffect(() => {
+    if (!isActive) return;
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      void sendTelemetry();
+    }, intervalMs);
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [isActive, intervalMs, sendTelemetry]);
+
+  // Pull the current global interval on mount so the very first tick uses
+  // whatever the operator last set.
+  useEffect(() => {
+    let cancelled = false;
+    fetchTrackingInterval()
+      .then((res) => {
+        if (!cancelled) setIntervalMs(res.intervalSec * 1000);
+      })
+      .catch(() => {
+        // keep the default — tracking still works offline
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return onTrackingIntervalChanged((event) => {
+      setIntervalMs(event.intervalSec * 1000);
+    });
+  }, []);
+
+  // Tracking-specific commands (request_location_now, toggle_tracking).
+  // ring_alarm and lock_device are handled globally in App.tsx so they
+  // still work when the user is on a different screen.
+  useEffect(() => {
+    if (!storedData?.deviceId) return;
+    return onCommand(async (event: CommandDispatchEvent) => {
+      if (event.command === 'request_location_now') {
+        ackCommand(event.commandId);
+        const current = await sendTelemetry();
+        if (current) {
+          sendCommandResult({
+            commandId: event.commandId,
+            success: true,
+            data: { lat: current.latitude, lon: current.longitude },
+          });
+        } else {
+          sendCommandResult({
+            commandId: event.commandId,
+            success: false,
+            error: 'Không lấy được vị trí',
+          });
+        }
+      } else if (event.command === 'toggle_tracking') {
+        ackCommand(event.commandId);
+        const enabled = !!event.payload?.enabled;
+        try {
+          if (enabled && !isActiveRef.current) {
+            const ok = await startTracking();
+            sendCommandResult({
+              commandId: event.commandId,
+              success: ok,
+              error: ok ? null : 'Không bật được tracking',
+            });
+          } else if (!enabled && isActiveRef.current) {
+            stopTracking();
+            sendCommandResult({ commandId: event.commandId, success: true });
+          } else {
+            // no-op but still a success — the device is already in the
+            // requested state.
+            sendCommandResult({ commandId: event.commandId, success: true });
+          }
+        } catch (err) {
+          sendCommandResult({
+            commandId: event.commandId,
+            success: false,
+            error: err instanceof Error ? err.message : 'failed',
+          });
+        }
+      }
+    });
+  }, [storedData, sendTelemetry, startTracking, stopTracking]);
 
   useFocusEffect(
     useCallback(() => {
@@ -188,7 +293,7 @@ export default function TrackingScreen() {
 
         <TouchableOpacity
           style={[styles.toggleBtn, isActive ? styles.stopBtn : styles.startBtn]}
-          onPress={isActive ? stopTracking : startTracking}
+          onPress={isActive ? stopTracking : () => void startTracking()}
           activeOpacity={0.7}
           disabled={sending && !isActive}
         >
@@ -207,6 +312,7 @@ export default function TrackingScreen() {
             label="Gửi cuối"
             value={lastSentAt ? lastSentAt.toLocaleTimeString('vi-VN') : '--'}
           />
+          <Stat label="Chu kỳ" value={`${Math.round(intervalMs / 1000)}s`} />
           <Stat label="MQTT" value={mqttConnected ? 'ON' : 'OFF'} />
           <Stat label="GPS" value={isWatching ? 'ON' : 'OFF'} />
         </View>

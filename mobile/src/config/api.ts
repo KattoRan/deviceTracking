@@ -32,5 +32,9 @@ export const MQTT_CONFIG = {
   },
 } as const;
 
-/** 30 s per SPEC §1.4. */
-export const TRACKING_INTERVAL_MS = 30_000;
+/**
+ * Default tracking cycle (30 s per SPEC §1.4). The actual interval is a
+ * global setting — mobile fetches it at start and updates dynamically on
+ * the `tracking_interval_changed` socket broadcast (chức năng 2).
+ */
+export const DEFAULT_TRACKING_INTERVAL_MS = 30_000;

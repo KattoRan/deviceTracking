@@ -4,6 +4,7 @@ import type {
   IngestResponse,
   RegisterDeviceRequest,
   RegisterDeviceResponse,
+  TrackingIntervalResponse,
 } from '../models/types';
 
 export class ApiError extends Error {
@@ -83,4 +84,10 @@ export function sendIngestData(
 
 export async function deleteDevice(deviceId: string): Promise<void> {
   await request<void>(`/api/v1/devices/${deviceId}`, { method: 'DELETE' });
+}
+
+export function fetchTrackingInterval(): Promise<TrackingIntervalResponse> {
+  return request<TrackingIntervalResponse>('/api/v1/settings/tracking-interval', {
+    method: 'GET',
+  });
 }

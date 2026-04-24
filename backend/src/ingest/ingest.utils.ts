@@ -9,14 +9,36 @@ export function isValidCell(c: CellTowerDto): boolean {
   return true;
 }
 
+/**
+ * Picks the serving cell.
+ *
+ * Source of truth is `isRegistered` reported by the modem (via
+ * `CellInfo.isRegistered` on Android) — that's the cell the device is
+ * actually attached to. Signal strength is only a heuristic and can
+ * mislead: a neighbour cell may have higher RSRP than the serving one
+ * during handover, and under LTE+NR NSA the anchor and secondary are
+ * both registered at once with different signals.
+ *
+ * Policy:
+ *   1. If any cell reports `isRegistered=true`, pick the strongest among
+ *      them. This handles dual-registered NSA correctly — the anchor
+ *      (LTE) and the NR leg are both registered, we surface the one the
+ *      user is effectively experiencing.
+ *   2. Otherwise (iOS, older builds, mock data without the flag),
+ *      fall back to the strongest signal overall.
+ */
 export function markServingCell(cells: CellTowerDto[]): NormalizedCell[] {
+  if (cells.length === 0) return [];
+
+  const registered = cells.filter((c) => c.isRegistered === true);
+  const pool = registered.length > 0 ? registered : cells;
+
   let bestIndex = -1;
   let bestDbm = -Infinity;
-
-  cells.forEach((c, i) => {
+  pool.forEach((c) => {
     if (c.signalDbm > bestDbm) {
       bestDbm = c.signalDbm;
-      bestIndex = i;
+      bestIndex = cells.indexOf(c);
     }
   });
 

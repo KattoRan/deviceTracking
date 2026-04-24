@@ -1,16 +1,36 @@
 import { io, type Socket } from 'socket.io-client';
 import { SOCKET_CONFIG } from '../config/api';
-import type { DeviceMovedEvent } from '../models/types';
+import type {
+  CommandDispatchEvent,
+  CommandResultBody,
+  DeviceMovedEvent,
+  TrackingIntervalChangedEvent,
+} from '../models/types';
 
 type DeviceMovedCallback = (event: DeviceMovedEvent) => void;
+type CommandCallback = (event: CommandDispatchEvent) => void;
+type TrackingIntervalCallback = (event: TrackingIntervalChangedEvent) => void;
 
 let socket: Socket | null = null;
-const listeners = new Set<DeviceMovedCallback>();
+let joinedDeviceId: string | null = null;
+const deviceMovedListeners = new Set<DeviceMovedCallback>();
+const commandListeners = new Set<CommandCallback>();
+const trackingIntervalListeners = new Set<TrackingIntervalCallback>();
+
+function fanOut<T>(listeners: Set<(event: T) => void>, event: T): void {
+  for (const cb of listeners) {
+    try {
+      cb(event);
+    } catch {
+      // listeners must never throw up the stack
+    }
+  }
+}
 
 /**
- * Lazily connects to the backend Socket.IO gateway and registers a
- * fan-out dispatcher for `device_moved`. Calling this while a socket
- * already exists is a no-op.
+ * Lazily connects to the backend Socket.IO gateway and registers dispatchers
+ * for device_moved, command, and tracking_interval_changed. Calling this
+ * while a socket already exists is a no-op.
  */
 export function connectSocket(): Socket {
   if (socket?.connected) return socket;
@@ -24,13 +44,23 @@ export function connectSocket(): Socket {
     reconnectionDelayMax: SOCKET_CONFIG.options.reconnectionDelayMax,
   });
 
-  socket.on('device_moved', (event: DeviceMovedEvent) => {
-    for (const cb of listeners) {
-      try {
-        cb(event);
-      } catch {
-        // listeners must never throw up the stack
-      }
+  socket.on('device_moved', (event: DeviceMovedEvent) =>
+    fanOut(deviceMovedListeners, event),
+  );
+  socket.on('command', (event: CommandDispatchEvent) =>
+    fanOut(commandListeners, event),
+  );
+  socket.on(
+    'tracking_interval_changed',
+    (event: TrackingIntervalChangedEvent) =>
+      fanOut(trackingIntervalListeners, event),
+  );
+
+  // Re-join the device room on every connect/reconnect — socket.io rooms are
+  // per-socket and are lost on disconnect.
+  socket.on('connect', () => {
+    if (joinedDeviceId) {
+      socket?.emit('join_device', { deviceId: joinedDeviceId });
     }
   });
 
@@ -41,6 +71,7 @@ export function disconnectSocket(): void {
   if (!socket) return;
   socket.disconnect();
   socket = null;
+  joinedDeviceId = null;
 }
 
 export function isSocketConnected(): boolean {
@@ -48,13 +79,49 @@ export function isSocketConnected(): boolean {
 }
 
 /**
- * Subscribes to `device_moved` events. Returns an unsubscribe function.
- * Connects on first subscriber.
+ * Subscribes this socket to commands targeted at `deviceId`. Safe to call
+ * before the socket connects — the id is re-sent on every reconnect.
  */
+export function joinDeviceRoom(deviceId: string): void {
+  joinedDeviceId = deviceId;
+  if (!socket) connectSocket();
+  if (socket?.connected) {
+    socket.emit('join_device', { deviceId });
+  }
+}
+
 export function onDeviceMoved(cb: DeviceMovedCallback): () => void {
   if (!socket) connectSocket();
-  listeners.add(cb);
+  deviceMovedListeners.add(cb);
   return () => {
-    listeners.delete(cb);
+    deviceMovedListeners.delete(cb);
   };
+}
+
+export function onCommand(cb: CommandCallback): () => void {
+  if (!socket) connectSocket();
+  commandListeners.add(cb);
+  return () => {
+    commandListeners.delete(cb);
+  };
+}
+
+export function onTrackingIntervalChanged(
+  cb: TrackingIntervalCallback,
+): () => void {
+  if (!socket) connectSocket();
+  trackingIntervalListeners.add(cb);
+  return () => {
+    trackingIntervalListeners.delete(cb);
+  };
+}
+
+export function ackCommand(commandId: string): void {
+  if (!socket?.connected) return;
+  socket.emit('command_ack', { commandId });
+}
+
+export function sendCommandResult(body: CommandResultBody): void {
+  if (!socket?.connected) return;
+  socket.emit('command_result', body);
 }

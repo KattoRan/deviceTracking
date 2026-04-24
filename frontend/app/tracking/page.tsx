@@ -35,6 +35,11 @@ const DeviceDetailPanel = dynamic(
   { ssr: false },
 );
 
+const TrackingIntervalControl = dynamic(
+  () => import("@/components/tracking/TrackingIntervalControl"),
+  { ssr: false },
+);
+
 export default function TrackingPage() {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const isTablet = useMediaQuery("(min-width: 768px) and (max-width: 1023px)");
@@ -164,6 +169,8 @@ export default function TrackingPage() {
           showBtsLines={showBtsLines}
           onToggleBtsLines={() => setShowBtsLines((v) => !v)}
         />
+
+        <TrackingIntervalControl />
 
         <AnimatePresence>
           {selectedDevice && (

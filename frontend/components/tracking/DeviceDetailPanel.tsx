@@ -17,6 +17,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import deviceService from "@/services/deviceService";
 import type { CellTowerInfo, Device, DeviceDetail } from "@/types/device";
+import RemoteControlPanel from "./RemoteControlPanel";
 
 interface DeviceDetailPanelProps {
   device: Device;
@@ -158,6 +159,8 @@ export default function DeviceDetailPanel({
           )}
         </div>
       </div>
+
+      <RemoteControlPanel deviceId={device.id} />
 
       {loading ? (
         <div className="flex items-center justify-center py-16">

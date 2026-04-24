@@ -33,8 +33,32 @@ model devices {
 
   location_history   location_history[]
   cell_tower_history cell_tower_history[]
+  commands           device_commands[]
 
   @@index([user_id])
+}
+
+model device_commands {
+  id           String    @id @default(uuid())
+  device_id    String
+  command      String
+  payload      Json?
+  status       String    @default("pending")
+  error        String?
+  created_at   DateTime  @default(now())
+  delivered_at DateTime?
+  executed_at  DateTime?
+
+  device devices @relation(fields: [device_id], references: [id], onDelete: Cascade)
+
+  @@index([device_id, status])
+  @@index([created_at])
+}
+
+model app_settings {
+  key        String   @id
+  value      Json
+  updated_at DateTime @default(now()) @updatedAt
 }
 
 model location_history {
