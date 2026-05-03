@@ -1,18 +1,21 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   History,
   LayoutDashboard,
+  LogOut,
   MapPin,
   Menu,
   Radio,
   Settings,
+  UserCircle,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -28,6 +31,8 @@ const NAV_ITEMS: NavItem[] = [
   { name: "Quản lý", icon: Settings, href: "/manage-devices" },
 ];
 
+const PUBLIC_ROUTES = new Set(["/login"]);
+
 interface AppLayoutProps {
   children: ReactNode;
 }
@@ -35,6 +40,36 @@ interface AppLayoutProps {
 export default function AppLayout({ children }: AppLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const { admin, loading, logout } = useAuth();
+
+  const isPublic = PUBLIC_ROUTES.has(pathname);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!admin && !isPublic) {
+      const from = encodeURIComponent(pathname);
+      router.replace(`/login?from=${from}`);
+    }
+  }, [admin, loading, isPublic, pathname, router]);
+
+  // Login page renders standalone (no nav, no guard).
+  if (isPublic) {
+    return <>{children}</>;
+  }
+
+  if (loading || !admin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+        Đang tải…
+      </div>
+    );
+  }
+
+  function handleLogout() {
+    logout();
+    router.replace("/login");
+  }
 
   // The tracking page owns the full viewport (map fills the screen).
   if (pathname === "/tracking") {
@@ -77,19 +112,35 @@ export default function AppLayout({ children }: AppLayoutProps) {
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen((prev) => !prev)}
-              aria-label="Toggle menu"
-              aria-expanded={mobileMenuOpen}
-              className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
-            >
-              {mobileMenuOpen ? (
-                <X className="h-5 w-5" />
-              ) : (
-                <Menu className="h-5 w-5" />
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 md:flex">
+                <UserCircle className="h-4 w-4 text-slate-500" />
+                <span className="font-medium">{admin.username}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                aria-label="Đăng xuất"
+                title="Đăng xuất"
+                className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-red-50 hover:text-red-600 md:flex"
+              >
+                <LogOut className="h-4 w-4" />
+                Đăng xuất
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen((prev) => !prev)}
+                aria-label="Toggle menu"
+                aria-expanded={mobileMenuOpen}
+                className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
+              >
+                {mobileMenuOpen ? (
+                  <X className="h-5 w-5" />
+                ) : (
+                  <Menu className="h-5 w-5" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -115,6 +166,23 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 </Link>
               );
             })}
+            <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <UserCircle className="h-4 w-4 text-slate-500" />
+                <span className="font-medium">{admin.username}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  handleLogout();
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-red-50 hover:text-red-600"
+              >
+                <LogOut className="h-4 w-4" />
+                Đăng xuất
+              </button>
+            </div>
           </div>
         )}
       </nav>

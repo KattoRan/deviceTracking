@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
 import { BtsModule } from './bts/bts.module';
 import { CommandsModule } from './commands/commands.module';
 import { DevicesModule } from './devices/devices.module';
@@ -18,6 +19,7 @@ import { SettingsModule } from './settings/settings.module';
     PrismaModule,
     RedisModule,
     EventsModule,
+    AuthModule,
     BtsModule,
     IngestModule,
     MqttModule,

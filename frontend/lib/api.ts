@@ -8,3 +8,15 @@ export const apiClient: AxiosInstance = axios.create({
   headers: { "Content-Type": "application/json" },
   timeout: 15_000,
 });
+
+const AUTH_TOKEN_KEY = "deviceTracking.adminToken";
+
+apiClient.interceptors.request.use((config) => {
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+    if (token) {
+      config.headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+  return config;
+});

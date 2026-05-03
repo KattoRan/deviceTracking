@@ -61,6 +61,14 @@ model app_settings {
   updated_at DateTime @default(now()) @updatedAt
 }
 
+model admins {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  password_hash String
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+}
+
 model location_history {
   id        String  @id @default(uuid())
   device_id String
