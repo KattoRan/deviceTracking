@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiConflictResponse,
@@ -18,6 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DevicesService } from './devices.service';
+import { HistoryQueryDto } from './dto/history-query.dto';
 import { RegisterDeviceDto, RegisterDeviceResponseDto } from './dto/register-device.dto';
 
 @ApiTags('devices')
@@ -38,6 +40,23 @@ export class DevicesController {
   @ApiOperation({ summary: 'Danh sách thiết bị kèm vị trí & BTS mới nhất' })
   findAll() {
     return this.devicesService.findAll();
+  }
+
+  @Get(':id/history')
+  @ApiOperation({
+    summary: 'Lịch sử di chuyển trong khoảng [from, to] (mặc định: hôm nay → now)',
+  })
+  @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
+  getHistory(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: HistoryQueryDto,
+  ) {
+    return this.devicesService.getLocationHistory(
+      id,
+      query.from,
+      query.to,
+      query.minDistanceMeters,
+    );
   }
 
   @Get(':id')

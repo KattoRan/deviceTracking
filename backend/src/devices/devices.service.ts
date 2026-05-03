@@ -123,6 +123,91 @@ export class DevicesService {
     });
   }
 
+  async getLocationHistory(
+    deviceId: string,
+    from?: string,
+    to?: string,
+    minDistanceMeters?: number,
+  ) {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      include: { user: { select: { full_name: true } } },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+
+    const now = new Date();
+    const fromDate = from
+      ? new Date(from)
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const toDate = to ? new Date(to) : now;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        latitude: string;
+        longitude: string;
+        district: string | null;
+        recorded_at: Date;
+      }>
+    >`
+      SELECT latitude::text AS latitude,
+             longitude::text AS longitude,
+             district,
+             recorded_at
+      FROM location_history
+      WHERE device_id = ${deviceId}
+        AND recorded_at >= ${fromDate}
+        AND recorded_at <= ${toDate}
+      ORDER BY recorded_at ASC;
+    `;
+
+    const minDist = minDistanceMeters ?? 0;
+    const points: Array<{
+      lat: number;
+      lon: number;
+      district: string | null;
+      time: Date;
+    }> = [];
+    let distanceTotal = 0;
+    let prevLat: number | null = null;
+    let prevLon: number | null = null;
+
+    for (const row of rows) {
+      const lat = Number(row.latitude);
+      const lon = Number(row.longitude);
+      if (prevLat !== null && prevLon !== null) {
+        const stepDist = haversineMeters(prevLat, prevLon, lat, lon);
+        if (minDist > 0 && stepDist < minDist) continue;
+        distanceTotal += stepDist;
+      }
+      points.push({ lat, lon, district: row.district, time: row.recorded_at });
+      prevLat = lat;
+      prevLon = lon;
+    }
+
+    const durationMs =
+      points.length >= 2
+        ? new Date(points[points.length - 1].time).getTime() -
+          new Date(points[0].time).getTime()
+        : 0;
+    const avgSpeedKmh =
+      durationMs > 0 ? (distanceTotal / 1000) / (durationMs / 3_600_000) : 0;
+
+    return {
+      device: {
+        id: device.id,
+        name: device.user?.full_name ?? device.phone_number,
+        phone_number: device.phone_number,
+      },
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
+      total: points.length,
+      distance_total_m: Math.round(distanceTotal),
+      duration_ms: durationMs,
+      avg_speed_kmh: Math.round(avgSpeedKmh * 10) / 10,
+      points,
+    };
+  }
+
   async remove(id: string): Promise<void> {
     const device = await this.prisma.devices.findUnique({
       where: { id },

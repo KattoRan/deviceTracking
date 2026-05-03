@@ -97,6 +97,9 @@ export interface LocationHistory {
   from: string;
   to: string;
   total: number;
+  distance_total_m: number;
+  duration_ms: number;
+  avg_speed_kmh: number;
   points: HistoryPoint[];
 }
 
