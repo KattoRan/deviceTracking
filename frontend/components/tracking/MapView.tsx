@@ -4,8 +4,10 @@ import "leaflet/dist/leaflet.css";
 
 import { useEffect, useMemo, useRef } from "react";
 import {
+  Circle,
   MapContainer,
   TileLayer,
+  Tooltip,
   ZoomControl,
   useMap,
   useMapEvents,
@@ -13,6 +15,7 @@ import {
 import type { MapBounds } from "@/services/btsService";
 import type { BtsGeoJson } from "@/types/bts";
 import type { Device } from "@/types/device";
+import type { GeofenceListItem } from "@/types/geofence";
 import BtsLayer from "./BtsLayer";
 import DeviceMarker, { type BtsMapStation } from "./DeviceMarker";
 
@@ -126,6 +129,8 @@ interface MapViewProps {
   showBts: boolean;
   showCoverage: boolean;
   showBtsLines: boolean;
+  geofences: GeofenceListItem[];
+  showGeofences: boolean;
 }
 
 export default function MapView({
@@ -137,6 +142,8 @@ export default function MapView({
   showBts,
   showCoverage,
   showBtsLines,
+  geofences,
+  showGeofences,
 }: MapViewProps) {
   const btsStations = useMemo<BtsMapStation[]>(() => {
     if (!geoJsonData) return [];
@@ -195,6 +202,32 @@ export default function MapView({
           onClick={onDeviceClick}
         />
       ))}
+
+      {showGeofences &&
+        geofences.map((g) => (
+          <Circle
+            key={g.id}
+            center={[g.lat, g.lon]}
+            radius={g.radiusM}
+            pathOptions={{
+              color: "#f59e0b",
+              weight: 2,
+              opacity: 0.9,
+              dashArray: "6 4",
+              fillColor: "#fbbf24",
+              fillOpacity: 0.1,
+            }}
+          >
+            <Tooltip direction="top" offset={[0, -4]} sticky>
+              <div className="text-xs">
+                <div className="font-semibold">{g.name}</div>
+                <div className="text-slate-500">
+                  Bán kính {g.radiusM}m · {g.deviceCount} thiết bị
+                </div>
+              </div>
+            </Tooltip>
+          </Circle>
+        ))}
     </MapContainer>
   );
 }

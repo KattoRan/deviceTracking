@@ -9,6 +9,7 @@ import {
   Menu,
   Radio,
   Settings,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -26,6 +27,7 @@ const ITEMS: NavItem[] = [
   { name: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { name: "Giám sát", icon: MapPin, href: "/tracking", active: true },
   { name: "Lịch sử", icon: History, href: "/history" },
+  { name: "Vùng an toàn", icon: Shield, href: "/geofences" },
   { name: "Quản lý thiết bị", icon: Settings, href: "/manage-devices" },
 ];
 

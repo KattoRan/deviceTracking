@@ -1,5 +1,6 @@
 import { API_BASE_URL, API_ENDPOINTS, REQUEST_TIMEOUT_MS } from '../config/api';
 import type {
+  GeofenceBreachEvent,
   IngestPayload,
   IngestResponse,
   RegisterDeviceRequest,
@@ -90,4 +91,18 @@ export function fetchTrackingInterval(): Promise<TrackingIntervalResponse> {
   return request<TrackingIntervalResponse>('/api/v1/settings/tracking-interval', {
     method: 'GET',
   });
+}
+
+/**
+ * Returns the device's currently active geofence breach, or null when it's
+ * inside the zone (or has no zone). Used on app launch to re-show the
+ * persistent banner without waiting for the next ingest-driven transition.
+ */
+export function fetchActiveBreach(
+  deviceId: string,
+): Promise<GeofenceBreachEvent | null> {
+  return request<GeofenceBreachEvent | null>(
+    `/api/v1/devices/${deviceId}/active-breach`,
+    { method: 'GET' },
+  );
 }

@@ -18,6 +18,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import type { GeofenceBreachEvent } from '../events/events.gateway';
 import { DevicesService } from './devices.service';
 import { HistoryQueryDto } from './dto/history-query.dto';
 import { RegisterDeviceDto, RegisterDeviceResponseDto } from './dto/register-device.dto';
@@ -57,6 +58,17 @@ export class DevicesController {
       query.to,
       query.minDistanceMeters,
     );
+  }
+
+  @Get(':id/active-breach')
+  @ApiOperation({
+    summary:
+      'Trạng thái vi phạm vùng an toàn hiện tại của thiết bị (null nếu trong vùng)',
+  })
+  getActiveBreach(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<GeofenceBreachEvent | null> {
+    return this.devicesService.getActiveBreach(id);
   }
 
   @Get(':id')

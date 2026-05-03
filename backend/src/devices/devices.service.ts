@@ -1,4 +1,6 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { GeofenceBreachEvent } from '../events/events.gateway';
+import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 
@@ -23,7 +25,20 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 export class DevicesService {
   private readonly logger = new Logger(DevicesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly geofenceState: GeofenceStateService,
+  ) {}
+
+  /**
+   * Returns the device's currently-active breach payload, or null when the
+   * device is inside its zone or has no zone assigned. Public (no JWT) so
+   * the mobile client can re-show its banner after an app restart without
+   * waiting for the next transition event over the socket.
+   */
+  async getActiveBreach(deviceId: string): Promise<GeofenceBreachEvent | null> {
+    return this.geofenceState.getBreach(deviceId);
+  }
 
   async register(dto: RegisterDeviceDto): Promise<{ userId: string; deviceId: string }> {
     return this.prisma.$transaction(async (tx) => {

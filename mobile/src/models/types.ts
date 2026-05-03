@@ -99,6 +99,21 @@ export interface TrackingIntervalChangedEvent {
   updatedAt: string;
 }
 
+export interface GeofenceBreachEvent {
+  deviceId: string;
+  deviceName: string | null;
+  geofenceId: string;
+  geofenceName: string;
+  status: 'outside' | 'returned';
+  lat: number;
+  lon: number;
+  centerLat: number;
+  centerLon: number;
+  radiusM: number;
+  distanceM: number;
+  timestamp: string;
+}
+
 export interface CommandResultBody {
   commandId: string;
   success: boolean;

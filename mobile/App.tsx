@@ -4,7 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Vibration, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import BreachBellButton from './src/components/BreachBellButton';
 import LockOverlay from './src/components/LockOverlay';
+import ReturnedToast from './src/components/ReturnedToast';
+import { GeofenceAlertProvider } from './src/contexts/GeofenceAlertContext';
 import { useDeviceInfo } from './src/hooks/useDeviceInfo';
 import type { CommandDispatchEvent, RootStackParamList } from './src/models/types';
 import {
@@ -80,32 +83,46 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
-      <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName={registrationStatus === 'registered' ? 'Home' : 'Register'}
-          screenOptions={{
-            headerStyle: { backgroundColor: '#1976D2' },
-            headerTintColor: '#fff',
-          }}
-        >
-          <Stack.Screen
-            name="Register"
-            component={RegisterScreen}
-            options={{ title: 'Đăng ký thiết bị' }}
-          />
-          <Stack.Screen
-            name="Home"
-            component={HomeScreen}
-            options={{ title: 'Trang chủ', headerBackVisible: false }}
-          />
-          <Stack.Screen
-            name="Tracking"
-            component={TrackingScreen}
-            options={{ title: 'Giám sát' }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
-      <LockOverlay visible={lockMessage != null} message={lockMessage ?? undefined} />
+      <GeofenceAlertProvider deviceId={storedData?.deviceId ?? null}>
+        <NavigationContainer>
+          <Stack.Navigator
+            initialRouteName={
+              registrationStatus === 'registered' ? 'Home' : 'Register'
+            }
+            screenOptions={{
+              headerStyle: { backgroundColor: '#1976D2' },
+              headerTintColor: '#fff',
+              // Bell sits in every screen header so the user can read the
+              // current breach state from anywhere with a single tap.
+              headerRight: () =>
+                registrationStatus === 'registered' ? (
+                  <BreachBellButton />
+                ) : null,
+            }}
+          >
+            <Stack.Screen
+              name="Register"
+              component={RegisterScreen}
+              options={{ title: 'Đăng ký thiết bị' }}
+            />
+            <Stack.Screen
+              name="Home"
+              component={HomeScreen}
+              options={{ title: 'Trang chủ', headerBackVisible: false }}
+            />
+            <Stack.Screen
+              name="Tracking"
+              component={TrackingScreen}
+              options={{ title: 'Giám sát' }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+        <LockOverlay
+          visible={lockMessage != null}
+          message={lockMessage ?? undefined}
+        />
+        <ReturnedToast />
+      </GeofenceAlertProvider>
     </SafeAreaProvider>
   );
 }

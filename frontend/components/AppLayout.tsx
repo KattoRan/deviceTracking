@@ -11,11 +11,17 @@ import {
   Menu,
   Radio,
   Settings,
+  Shield,
   UserCircle,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
+import {
+  GeofenceAlertsProvider,
+  GeofenceBell,
+  GeofenceReturnedToasts,
+} from "@/components/GeofenceAlerts";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -28,6 +34,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { name: "Giám sát", icon: MapPin, href: "/tracking" },
   { name: "Lịch sử", icon: History, href: "/history" },
+  { name: "Vùng an toàn", icon: Shield, href: "/geofences" },
   { name: "Quản lý", icon: Settings, href: "/manage-devices" },
 ];
 
@@ -73,11 +80,20 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   // The tracking page owns the full viewport (map fills the screen).
   if (pathname === "/tracking") {
-    return <>{children}</>;
+    return (
+      <GeofenceAlertsProvider>
+        {children}
+        <div className="fixed right-3 top-3 z-[1100]">
+          <GeofenceBell />
+        </div>
+        <GeofenceReturnedToasts />
+      </GeofenceAlertsProvider>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <GeofenceAlertsProvider>
+      <div className="min-h-screen bg-slate-50">
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 md:px-8">
           <div className="flex h-14 items-center justify-between">
@@ -113,6 +129,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              <GeofenceBell />
               <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 md:flex">
                 <UserCircle className="h-4 w-4 text-slate-500" />
                 <span className="font-medium">{admin.username}</span>
@@ -188,6 +205,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </nav>
 
       {children}
-    </div>
+      <GeofenceReturnedToasts />
+      </div>
+    </GeofenceAlertsProvider>
   );
 }

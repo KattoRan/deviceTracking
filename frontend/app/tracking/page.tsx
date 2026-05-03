@@ -3,13 +3,16 @@
 import dynamic from "next/dynamic";
 import { AnimatePresence } from "framer-motion";
 import { AlertCircle, Menu } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useSocket } from "@/hooks/useSocket";
 import deviceService from "@/services/deviceService";
 import btsService, { type MapBounds } from "@/services/btsService";
+import geofenceService from "@/services/geofenceService";
 import type { BtsGeoJson } from "@/types/bts";
 import type { Device, DeviceMovedEvent } from "@/types/device";
+import type { GeofenceListItem } from "@/types/geofence";
 
 const MapView = dynamic(() => import("@/components/tracking/MapView"), {
   ssr: false,
@@ -45,9 +48,11 @@ const FloatingNav = dynamic(
   { ssr: false },
 );
 
-export default function TrackingPage() {
+function TrackingPageInner() {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const isTablet = useMediaQuery("(min-width: 768px) and (max-width: 1023px)");
+  const searchParams = useSearchParams();
+  const focusDeviceId = searchParams.get("focus");
 
   const [devices, setDevices] = useState<Device[]>([]);
   const [devicesLoading, setDevicesLoading] = useState(true);
@@ -59,6 +64,8 @@ export default function TrackingPage() {
   const [showBtsLines, setShowBtsLines] = useState(true);
   const [geoJsonData, setGeoJsonData] = useState<BtsGeoJson | null>(null);
   const [btsLoading, setBtsLoading] = useState(false);
+  const [geofences, setGeofences] = useState<GeofenceListItem[]>([]);
+  const [showGeofences, setShowGeofences] = useState(true);
 
   const handleDeviceMoved = useCallback((event: DeviceMovedEvent) => {
     const patch: Partial<Device> = {
@@ -97,6 +104,31 @@ export default function TrackingPage() {
       })
       .finally(() => {
         if (!cancelled) setDevicesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Deep-link from a geofence breach toast (`/tracking?focus=<id>`):
+  // pick the device once it's in the loaded list. MapView's `FlyToDevice`
+  // then takes over and pans the map to it.
+  useEffect(() => {
+    if (!focusDeviceId || devices.length === 0) return;
+    const target = devices.find((d) => d.id === focusDeviceId);
+    if (target) setSelectedDevice(target);
+  }, [focusDeviceId, devices]);
+
+  // Geofences are admin-managed and rarely change; load once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    geofenceService
+      .list()
+      .then((data) => {
+        if (!cancelled) setGeofences(data);
+      })
+      .catch(() => {
+        // Non-fatal — the rest of the page still works without zones.
       });
     return () => {
       cancelled = true;
@@ -166,6 +198,8 @@ export default function TrackingPage() {
           showBts={showBts}
           showCoverage={showCoverage}
           showBtsLines={showBtsLines}
+          geofences={geofences}
+          showGeofences={showGeofences}
         />
 
         <MapControls
@@ -175,6 +209,8 @@ export default function TrackingPage() {
           onToggleCoverage={() => setShowCoverage((v) => !v)}
           showBtsLines={showBtsLines}
           onToggleBtsLines={() => setShowBtsLines((v) => !v)}
+          showGeofences={showGeofences}
+          onToggleGeofences={() => setShowGeofences((v) => !v)}
         />
 
         <TrackingIntervalControl />
@@ -211,5 +247,13 @@ export default function TrackingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function TrackingPage() {
+  return (
+    <Suspense fallback={null}>
+      <TrackingPageInner />
+    </Suspense>
   );
 }

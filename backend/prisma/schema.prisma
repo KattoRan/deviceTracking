@@ -28,14 +28,29 @@ model devices {
   device_os     String?
   last_seen     DateTime?
   registered_at DateTime  @default(now())
+  geofence_id   String?
 
-  user users @relation(fields: [user_id], references: [id])
+  user     users      @relation(fields: [user_id], references: [id])
+  geofence geofences? @relation(fields: [geofence_id], references: [id], onDelete: SetNull)
 
   location_history   location_history[]
   cell_tower_history cell_tower_history[]
   commands           device_commands[]
 
   @@index([user_id])
+  @@index([geofence_id])
+}
+
+model geofences {
+  id         String   @id @default(uuid())
+  name       String
+  lat        Decimal  @db.Decimal(10, 8)
+  lon        Decimal  @db.Decimal(11, 8)
+  radius_m   Int
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  devices devices[]
 }
 
 model device_commands {

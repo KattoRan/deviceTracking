@@ -1,6 +1,12 @@
 "use client";
 
-import { GitBranch, Radio, Waves, type LucideIcon } from "lucide-react";
+import {
+  GitBranch,
+  Radio,
+  Shield,
+  Waves,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MapControlsProps {
@@ -10,6 +16,8 @@ interface MapControlsProps {
   onToggleCoverage: () => void;
   showBtsLines: boolean;
   onToggleBtsLines: () => void;
+  showGeofences: boolean;
+  onToggleGeofences: () => void;
 }
 
 export default function MapControls({
@@ -19,6 +27,8 @@ export default function MapControls({
   onToggleCoverage,
   showBtsLines,
   onToggleBtsLines,
+  showGeofences,
+  onToggleGeofences,
 }: MapControlsProps) {
   return (
     <div className="absolute bottom-10 left-4 z-[1000] flex flex-col gap-2 max-md:bottom-20 max-md:left-auto max-md:right-4">
@@ -49,6 +59,14 @@ export default function MapControls({
         onClick={onToggleBtsLines}
         activeColor="text-emerald-700"
         activeBg="bg-emerald-50 border-emerald-300"
+      />
+      <ControlBtn
+        icon={Shield}
+        label="Vùng an toàn"
+        active={showGeofences}
+        onClick={onToggleGeofences}
+        activeColor="text-amber-700"
+        activeBg="bg-amber-50 border-amber-300"
       />
     </div>
   );

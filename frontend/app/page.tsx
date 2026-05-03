@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { History, LayoutDashboard, MapPin, Settings } from "lucide-react";
+import {
+  History,
+  LayoutDashboard,
+  MapPin,
+  Settings,
+  Shield,
+} from "lucide-react";
 
 const SHORTCUTS = [
   {
@@ -13,6 +19,12 @@ const SHORTCUTS = [
     icon: History,
     title: "Lịch sử",
     description: "Playback quỹ đạo di chuyển",
+  },
+  {
+    href: "/geofences",
+    icon: Shield,
+    title: "Vùng an toàn",
+    description: "Quản lý vùng và cảnh báo vượt vùng",
   },
   {
     href: "/manage-devices",

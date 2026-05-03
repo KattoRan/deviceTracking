@@ -7,6 +7,7 @@ import {
 import axios from 'axios';
 import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
+import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmitDataDto } from './dto/submit-data.dto';
 import {
@@ -15,6 +16,22 @@ import {
   markServingCell,
   type NormalizedCell,
 } from './ingest.utils';
+
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6_371_000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 @Injectable()
 export class IngestService {
@@ -25,6 +42,7 @@ export class IngestService {
     private readonly prisma: PrismaService,
     private readonly btsService: BtsService,
     private readonly eventsGateway: EventsGateway,
+    private readonly geofenceState: GeofenceStateService,
   ) {}
 
   async saveData(
@@ -36,7 +54,14 @@ export class IngestService {
 
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      select: { id: true },
+      select: {
+        id: true,
+        phone_number: true,
+        user: { select: { full_name: true } },
+        geofence: {
+          select: { id: true, name: true, lat: true, lon: true, radius_m: true },
+        },
+      },
     });
     if (!device) throw new NotFoundException('Device not found');
 
@@ -101,7 +126,88 @@ export class IngestService {
     void this.persistInBackground(deviceId, dto.location, cells, now);
     if (servingCell) void this.lookupBtsInBackground(servingCell);
 
+    if (device.geofence) {
+      void this.evaluateGeofence(
+        deviceId,
+        device.user?.full_name ?? device.phone_number,
+        dto.location.latitude,
+        dto.location.longitude,
+        device.geofence,
+        now,
+      );
+    }
+
     return { success: true, message: 'Data received' };
+  }
+
+  private async evaluateGeofence(
+    deviceId: string,
+    deviceName: string | null,
+    lat: number,
+    lon: number,
+    geofence: {
+      id: string;
+      name: string;
+      lat: { toString(): string } | number;
+      lon: { toString(): string } | number;
+      radius_m: number;
+    },
+    now: Date,
+  ): Promise<void> {
+    try {
+      const centerLat = Number(geofence.lat);
+      const centerLon = Number(geofence.lon);
+      const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
+      const current = distanceM > geofence.radius_m ? 'outside' : 'inside';
+      const previous = await this.geofenceState.get(deviceId);
+      await this.geofenceState.set(deviceId, current);
+
+      const event = {
+        deviceId,
+        deviceName,
+        geofenceId: geofence.id,
+        geofenceName: geofence.name,
+        status: (current === 'outside' ? 'outside' : 'returned') as
+          | 'outside'
+          | 'returned',
+        lat,
+        lon,
+        centerLat,
+        centerLon,
+        radiusM: geofence.radius_m,
+        distanceM: Math.round(distanceM),
+        timestamp: now.toISOString(),
+      };
+
+      // Reflect current truth in the breach store on EVERY ingest, regardless
+      // of whether a transition fired. This keeps the dashboard's
+      // /breaches/active list accurate, refreshes the distance/timestamp shown
+      // in the persistent banner, and self-heals from any earlier inconsistent
+      // state (e.g. ingests that ran before the breach store existed).
+      if (current === 'outside') {
+        await this.geofenceState.setBreach(event);
+      } else {
+        await this.geofenceState.clearBreach(deviceId);
+      }
+
+      // Socket emit only on transitions — broadcasting every ingest would
+      // spam the dashboard. First reading suppresses only the inside case;
+      // an already-outside device on first read is worth announcing.
+      const isTransition =
+        previous === null ? current === 'outside' : previous !== current;
+      if (!isTransition) return;
+
+      this.eventsGateway.emitGeofenceBreach(event);
+
+      this.logger.warn(
+        `Geofence ${current === 'outside' ? 'BREACH' : 'RETURN'} ` +
+          `device=${deviceId} zone=${geofence.id} dist=${Math.round(distanceM)}m`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `geofence eval failed for ${deviceId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async persistInBackground(

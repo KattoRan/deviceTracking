@@ -7,6 +7,7 @@ import { BtsModule } from './bts/bts.module';
 import { CommandsModule } from './commands/commands.module';
 import { DevicesModule } from './devices/devices.module';
 import { EventsModule } from './events/events.module';
+import { GeofencesModule } from './geofences/geofences.module';
 import { IngestModule } from './ingest/ingest.module';
 import { MqttModule } from './mqtt/mqtt.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -21,6 +22,7 @@ import { SettingsModule } from './settings/settings.module';
     EventsModule,
     AuthModule,
     BtsModule,
+    GeofencesModule,
     IngestModule,
     MqttModule,
     DevicesModule,

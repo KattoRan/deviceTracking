@@ -58,6 +58,21 @@ export interface TrackingIntervalChangedEvent {
   updatedAt: string;
 }
 
+export interface GeofenceBreachEvent {
+  deviceId: string;
+  deviceName: string | null;
+  geofenceId: string;
+  geofenceName: string;
+  status: 'outside' | 'returned';
+  lat: number;
+  lon: number;
+  centerLat: number;
+  centerLon: number;
+  radiusM: number;
+  distanceM: number;
+  timestamp: string;
+}
+
 /** Room name a device joins to receive its own commands. */
 function deviceRoom(deviceId: string): string {
   return `device:${deviceId}`;
@@ -154,5 +169,15 @@ export class EventsGateway
    */
   emitTrackingIntervalChanged(event: TrackingIntervalChangedEvent) {
     this.server.emit('tracking_interval_changed', event);
+  }
+
+  /**
+   * Single global emit — every dashboard sees every alert; mobile clients
+   * filter by their own deviceId. Sending to the device room in addition
+   * to a global emit would double-deliver to the offending phone, so we
+   * deliberately emit once.
+   */
+  emitGeofenceBreach(event: GeofenceBreachEvent) {
+    this.server.emit('geofence_breach', event);
   }
 }
