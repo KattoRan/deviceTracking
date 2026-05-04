@@ -21,7 +21,11 @@ import type {
   IngestPayload,
 } from '../models/types';
 import { fetchTrackingInterval, sendIngestData } from '../services/apiService';
-import { getCellTowerInfo, isUsingMockCellInfo } from '../services/cellInfoService';
+import {
+  getCellTowerInfo,
+  isCellInfoUnavailable,
+  isUsingMockCellInfo,
+} from '../services/cellInfoService';
 import {
   connectMqtt,
   disconnectMqtt,
@@ -345,6 +349,13 @@ export default function TrackingScreen() {
         <Text style={styles.mockNotice}>
           Đang chạy trên Expo Go — dùng dữ liệu BTS mẫu. Chạy `expo prebuild` +
           `expo run:android` để đọc dữ liệu thật.
+        </Text>
+      )}
+      {isCellInfoUnavailable() && (
+        <Text style={styles.mockNotice}>
+          Native module `cell-info` chưa được link. Kiểm tra autolinking
+          (package.json → expo.autolinking.nativeModulesDir) rồi chạy lại
+          `expo prebuild --clean` + `expo run:android`.
         </Text>
       )}
       {cellTowers.length > 0 ? (

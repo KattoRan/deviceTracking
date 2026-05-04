@@ -1,6 +1,7 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import CellInfoModule, { type NativeCellInfo } from '../../modules/cell-info';
 import type { CellTower } from '../models/types';
+import { isExpoGo } from '../config/runtime';
 
 /**
  * Returns real cell-tower info from the local `cell-info` Expo Module.
@@ -14,6 +15,15 @@ import type { CellTower } from '../models/types';
  * before tracking starts) and `READ_PHONE_STATE`. We only ask for
  * READ_PHONE_STATE here because expo-location owns FINE_LOCATION.
  */
+
+export type CellInfoSource = 'real' | 'mock-expo-go' | 'unavailable';
+
+export function getCellInfoSource(): CellInfoSource {
+  if (Platform.OS !== 'android') return 'unavailable';
+  if (CellInfoModule != null) return 'real';
+  if (isExpoGo) return 'mock-expo-go';
+  return 'unavailable';
+}
 
 const MOCK_TOWERS: CellTower[] = [
   {
@@ -86,10 +96,10 @@ function normalize(raw: NativeCellInfo): CellTower | null {
 }
 
 export async function getCellTowerInfo(): Promise<CellTower[]> {
-  if (CellInfoModule == null) {
-    // Running under Expo Go / no prebuild.
-    return Platform.OS === 'android' ? MOCK_TOWERS : [];
-  }
+  const source = getCellInfoSource();
+
+  if (source === 'mock-expo-go') return MOCK_TOWERS;
+  if (source === 'unavailable') return [];
 
   if (Platform.OS === 'android') {
     const granted = await ensurePhoneStatePermission();
@@ -97,7 +107,7 @@ export async function getCellTowerInfo(): Promise<CellTower[]> {
   }
 
   try {
-    const raw = await CellInfoModule.getCellInfo();
+    const raw = await CellInfoModule!.getCellInfo();
     return raw.map(normalize).filter((c): c is CellTower => c !== null);
   } catch {
     return [];
@@ -105,9 +115,13 @@ export async function getCellTowerInfo(): Promise<CellTower[]> {
 }
 
 export function isRealCellInfoAvailable(): boolean {
-  return CellInfoModule != null && Platform.OS === 'android';
+  return getCellInfoSource() === 'real';
 }
 
 export function isUsingMockCellInfo(): boolean {
-  return CellInfoModule == null && Platform.OS === 'android';
+  return getCellInfoSource() === 'mock-expo-go';
+}
+
+export function isCellInfoUnavailable(): boolean {
+  return getCellInfoSource() === 'unavailable';
 }
