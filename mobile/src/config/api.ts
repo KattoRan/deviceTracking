@@ -25,11 +25,11 @@ export const REQUEST_TIMEOUT_MS = 15_000;
 export const SOCKET_CONFIG = {
   url: API_BASE_URL,
   options: {
-    // websocket-first nhưng vẫn cho phép polling fallback. Nhiều môi trường
-    // (Windows Firewall, WSL2 portproxy, corporate proxy) chặn WS upgrade
-    // nhưng vẫn cho HTTP long-polling đi qua — không có polling thì socket
-    // im lặng fail và toàn bộ command-from-server timeout.
-    transports: ['websocket', 'polling'] as const,
+    // Polling-first rồi upgrade WebSocket. Trên Android dev qua `adb reverse`,
+    // WS handshake thường OK nhưng frame sau đó bị adb buffer/reset →
+    // `transport error` → reconnect loop. Polling là HTTP ngắn nên ổn định
+    // qua adb; nếu upgrade WS được thì client tự chuyển, fail thì giữ polling.
+    transports: ['polling', 'websocket'] as const,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 3_000,

@@ -97,11 +97,13 @@ export class EventsGateway
   }
 
   handleConnection(client: Socket) {
-    this.logger.debug(`Client connected: ${client.id}`);
+    this.logger.log(
+      `Client connected: ${client.id} transport=${client.conn.transport.name}`,
+    );
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.debug(`Client disconnected: ${client.id}`);
+    this.logger.log(`Client disconnected: ${client.id}`);
   }
 
   /**
@@ -118,7 +120,7 @@ export class EventsGateway
       typeof body === 'string' ? body : body?.deviceId?.trim() || '';
     if (!deviceId) return { ok: false };
     void client.join(deviceRoom(deviceId));
-    this.logger.debug(`Socket ${client.id} joined ${deviceRoom(deviceId)}`);
+    this.logger.log(`Socket ${client.id} joined ${deviceRoom(deviceId)}`);
     return { ok: true };
   }
 
@@ -155,7 +157,12 @@ export class EventsGateway
 
   /** Targets only the owning device's socket(s). */
   emitCommand(deviceId: string, event: CommandDispatchEvent) {
-    this.server.to(deviceRoom(deviceId)).emit('command', event);
+    const room = deviceRoom(deviceId);
+    const size = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    this.logger.log(
+      `emitCommand cmd=${event.command} id=${event.commandId} → ${room} (sockets=${size})`,
+    );
+    this.server.to(room).emit('command', event);
   }
 
   /** Broadcast so every frontend observing this device can update its UI. */
