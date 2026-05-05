@@ -47,6 +47,17 @@ export function connectSocket(): Socket {
     reconnectionDelayMax: SOCKET_CONFIG.options.reconnectionDelayMax,
   });
 
+  // Surface lỗi kết nối ra log — nếu URL sai, firewall chặn, hoặc backend
+  // không reach được, đây là nơi duy nhất nhìn thấy. Không có log này thì
+  // command timeout im lặng phía web mà mobile không có manh mối gì.
+  socket.on('connect', () => console.log('[socket] connected', SOCKET_CONFIG.url));
+  socket.on('connect_error', (err) =>
+    console.warn('[socket] connect_error:', err.message),
+  );
+  socket.on('disconnect', (reason) =>
+    console.log('[socket] disconnect:', reason),
+  );
+
   socket.on('device_moved', (event: DeviceMovedEvent) =>
     fanOut(deviceMovedListeners, event),
   );
