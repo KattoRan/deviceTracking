@@ -16,13 +16,20 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
       provide: REDIS_CLIENT,
       useFactory: () => {
         const logger = new Logger('RedisModule');
-        const client = new Redis({
-          host: process.env.REDIS_HOST || 'localhost',
-          port: Number(process.env.REDIS_PORT) || 6379,
-          lazyConnect: false,
-          maxRetriesPerRequest: 3,
-          enableReadyCheck: true,
-        });
+        const url = process.env.REDIS_URL;
+        const client = url
+          ? new Redis(url, {
+              lazyConnect: false,
+              maxRetriesPerRequest: 3,
+              enableReadyCheck: true,
+            })
+          : new Redis({
+              host: process.env.REDIS_HOST || 'localhost',
+              port: Number(process.env.REDIS_PORT) || 6379,
+              lazyConnect: false,
+              maxRetriesPerRequest: 3,
+              enableReadyCheck: true,
+            });
         client.on('ready', () => logger.log('Redis ready'));
         client.on('error', (err) => logger.error(`Redis error: ${err.message}`));
         return client;

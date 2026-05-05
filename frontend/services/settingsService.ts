@@ -7,7 +7,7 @@ import type {
 export const settingsService = {
   getTrackingInterval: async (): Promise<TrackingIntervalSettings> => {
     const { data } = await apiClient.get<TrackingIntervalSettings>(
-      "/api/v1/settings/tracking-interval",
+      "api/v1/settings/tracking-interval",
     );
     return data;
   },
@@ -16,7 +16,7 @@ export const settingsService = {
     intervalSec: TrackingIntervalSec,
   ): Promise<TrackingIntervalSettings> => {
     const { data } = await apiClient.put<TrackingIntervalSettings>(
-      "/api/v1/settings/tracking-interval",
+      "api/v1/settings/tracking-interval",
       { intervalSec },
     );
     return data;

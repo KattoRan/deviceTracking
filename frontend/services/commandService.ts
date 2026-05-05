@@ -21,7 +21,7 @@ export const commandService = {
     payload?: CommandPayload,
   ): Promise<CreateCommandResponse> => {
     const { data } = await apiClient.post<CreateCommandResponse>(
-      `/api/v1/devices/${deviceId}/commands`,
+      `api/v1/devices/${deviceId}/commands`,
       { command, payload },
     );
     return data;
@@ -32,7 +32,7 @@ export const commandService = {
     params: ListCommandsParams = {},
   ): Promise<CommandListResponse> => {
     const { data } = await apiClient.get<CommandListResponse>(
-      `/api/v1/devices/${deviceId}/commands`,
+      `api/v1/devices/${deviceId}/commands`,
       { params },
     );
     return data;
@@ -40,7 +40,7 @@ export const commandService = {
 
   get: async (commandId: string): Promise<CommandRow & { deviceId: string }> => {
     const { data } = await apiClient.get<CommandRow & { deviceId: string }>(
-      `/api/v1/commands/${commandId}`,
+      `api/v1/commands/${commandId}`,
     );
     return data;
   },

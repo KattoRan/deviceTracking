@@ -10,28 +10,28 @@ import type {
 export const geofenceService = {
   list: async (): Promise<GeofenceListItem[]> => {
     const { data } = await apiClient.get<GeofenceListItem[]>(
-      "/api/v1/geofences",
+      "api/v1/geofences",
     );
     return data;
   },
 
   listActiveBreaches: async (): Promise<GeofenceBreachEvent[]> => {
     const { data } = await apiClient.get<GeofenceBreachEvent[]>(
-      "/api/v1/geofences/breaches/active",
+      "api/v1/geofences/breaches/active",
     );
     return data;
   },
 
   get: async (id: string): Promise<GeofenceDetail> => {
     const { data } = await apiClient.get<GeofenceDetail>(
-      `/api/v1/geofences/${id}`,
+      `api/v1/geofences/${id}`,
     );
     return data;
   },
 
   create: async (input: CreateGeofenceInput): Promise<GeofenceDetail> => {
     const { data } = await apiClient.post<GeofenceDetail>(
-      "/api/v1/geofences",
+      "api/v1/geofences",
       input,
     );
     return data;
@@ -42,14 +42,14 @@ export const geofenceService = {
     input: UpdateGeofenceInput,
   ): Promise<GeofenceDetail> => {
     const { data } = await apiClient.patch<GeofenceDetail>(
-      `/api/v1/geofences/${id}`,
+      `api/v1/geofences/${id}`,
       input,
     );
     return data;
   },
 
   remove: async (id: string): Promise<void> => {
-    await apiClient.delete(`/api/v1/geofences/${id}`);
+    await apiClient.delete(`api/v1/geofences/${id}`);
   },
 
   assignDevice: async (
@@ -57,7 +57,7 @@ export const geofenceService = {
     deviceId: string,
   ): Promise<GeofenceDetail> => {
     const { data } = await apiClient.post<GeofenceDetail>(
-      `/api/v1/geofences/${geofenceId}/devices`,
+      `api/v1/geofences/${geofenceId}/devices`,
       { deviceId },
     );
     return data;
@@ -68,7 +68,7 @@ export const geofenceService = {
     deviceId: string,
   ): Promise<GeofenceDetail> => {
     const { data } = await apiClient.delete<GeofenceDetail>(
-      `/api/v1/geofences/${geofenceId}/devices/${deviceId}`,
+      `api/v1/geofences/${geofenceId}/devices/${deviceId}`,
     );
     return data;
   },

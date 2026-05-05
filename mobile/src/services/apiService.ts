@@ -84,11 +84,11 @@ export function sendIngestData(
 }
 
 export async function deleteDevice(deviceId: string): Promise<void> {
-  await request<void>(`/api/v1/devices/${deviceId}`, { method: 'DELETE' });
+  await request<void>(`api/v1/devices/${deviceId}`, { method: 'DELETE' });
 }
 
 export function fetchTrackingInterval(): Promise<TrackingIntervalResponse> {
-  return request<TrackingIntervalResponse>('/api/v1/settings/tracking-interval', {
+  return request<TrackingIntervalResponse>('api/v1/settings/tracking-interval', {
     method: 'GET',
   });
 }
@@ -102,7 +102,7 @@ export function fetchActiveBreach(
   deviceId: string,
 ): Promise<GeofenceBreachEvent | null> {
   return request<GeofenceBreachEvent | null>(
-    `/api/v1/devices/${deviceId}/active-breach`,
+    `api/v1/devices/${deviceId}/active-breach`,
     { method: 'GET' },
   );
 }

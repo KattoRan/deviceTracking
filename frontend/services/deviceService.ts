@@ -21,12 +21,12 @@ export interface RegisterDeviceResult {
 
 export const deviceService = {
   getAll: async (): Promise<Device[]> => {
-    const { data } = await apiClient.get<Device[]>("/api/v1/devices");
+    const { data } = await apiClient.get<Device[]>("api/v1/devices");
     return data;
   },
 
   getOne: async (id: string): Promise<DeviceDetail> => {
-    const { data } = await apiClient.get<DeviceDetail>(`/api/v1/devices/${id}`);
+    const { data } = await apiClient.get<DeviceDetail>(`api/v1/devices/${id}`);
     return data;
   },
 
@@ -36,7 +36,7 @@ export const deviceService = {
     to: string,
   ): Promise<LocationHistory> => {
     const { data } = await apiClient.get<LocationHistory>(
-      `/api/v1/devices/${id}/history`,
+      `api/v1/devices/${id}/history`,
       { params: { from, to } },
     );
     return data;
@@ -44,7 +44,7 @@ export const deviceService = {
 
   register: async (dto: RegisterDeviceDto): Promise<RegisterDeviceResult> => {
     const { data } = await apiClient.post<RegisterDeviceResult>(
-      "/api/v1/devices/register",
+      "api/v1/devices/register",
       dto,
     );
     return data;

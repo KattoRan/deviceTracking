@@ -1,16 +1,27 @@
-import { SERVER_HOST } from './env';
+/**
+ * Cấu hình endpoint mobile. Vì project không dùng Expo Go (chỉ build APK/IPA
+ * qua `expo run:android` / `expo run:ios`), URL phải khai báo tường minh
+ * trong `.env` — không tự suy luận từ Metro hostUri.
+ *
+ * Quy ước:
+ *   - URL trong env LUÔN kết thúc bằng `/`
+ *   - Endpoint paths trong code KHÔNG có `/` ở đầu
+ *   → ghép `${API_BASE_URL}${path}` ra đúng URL, không bị `//`.
+ */
 
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL || `http://${SERVER_HOST}:3001`;
+  process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/';
+
+export const MQTT_URL =
+  process.env.EXPO_PUBLIC_MQTT_URL || 'ws://localhost:9001';
 
 export const API_ENDPOINTS = {
-  REGISTER_DEVICE: '/api/v1/devices/register',
-  INGEST: '/api/v1/ingest',
+  REGISTER_DEVICE: 'api/v1/devices/register',
+  INGEST: 'api/v1/ingest',
 } as const;
 
 export const REQUEST_TIMEOUT_MS = 15_000;
 
-/** Socket.IO — same URL as HTTP; NestJS platform-socket.io mounts on it. */
 export const SOCKET_CONFIG = {
   url: API_BASE_URL,
   options: {
@@ -22,9 +33,8 @@ export const SOCKET_CONFIG = {
   },
 } as const;
 
-/** Mosquitto MQTT over WebSocket (port 9001). */
 export const MQTT_CONFIG = {
-  url: process.env.EXPO_PUBLIC_MQTT_URL || `ws://${SERVER_HOST}:9001`,
+  url: MQTT_URL,
   options: {
     reconnectPeriod: 5_000,
     connectTimeout: 10_000,

@@ -21,14 +21,14 @@ export const tokenStorage = {
 export const authService = {
   login: async (input: LoginInput): Promise<LoginResponse> => {
     const { data } = await apiClient.post<LoginResponse>(
-      "/api/v1/auth/login",
+      "api/v1/auth/login",
       input,
     );
     return data;
   },
 
   me: async (): Promise<Admin> => {
-    const { data } = await apiClient.get<Admin>("/api/v1/auth/me");
+    const { data } = await apiClient.get<Admin>("api/v1/auth/me");
     return data;
   },
 };

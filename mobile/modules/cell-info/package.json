@@ -3,5 +3,14 @@
   "version": "0.1.0",
   "description": "Local Expo module reading TelephonyManager.getAllCellInfo() on Android",
   "main": "index.ts",
-  "private": true
+  "private": true,
+  "files": [
+    "index.ts",
+    "expo-module.config.json",
+    "android",
+    "ios"
+  ],
+  "expo": {
+    "platforms": ["android", "ios"]
+  }
 }
