@@ -43,7 +43,7 @@ export default function BreachDetailModal({
               <View style={styles.headerOutside}>
                 <Text style={styles.iconBig}>⚠️</Text>
                 <Text style={styles.titleOutside}>
-                  Đang ngoài vùng an toàn
+                  Đang ngoài vùng giám sát
                 </Text>
               </View>
 
@@ -89,7 +89,7 @@ export default function BreachDetailModal({
               <Text style={styles.iconBig}>✅</Text>
               <Text style={styles.titleOk}>Không có cảnh báo</Text>
               <Text style={styles.emptyHint}>
-                Thiết bị đang trong vùng an toàn.
+                Thiết bị đang trong vùng giám sát.
               </Text>
             </View>
           )}

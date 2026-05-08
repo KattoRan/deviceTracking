@@ -63,7 +63,7 @@ export class DevicesController {
   @Get(':id/active-breach')
   @ApiOperation({
     summary:
-      'Trạng thái vi phạm vùng an toàn hiện tại của thiết bị (null nếu trong vùng)',
+      'Trạng thái vi phạm vùng giám sát hiện tại của thiết bị (null nếu trong vùng)',
   })
   getActiveBreach(
     @Param('id', new ParseUUIDPipe()) id: string,

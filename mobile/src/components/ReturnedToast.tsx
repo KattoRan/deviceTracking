@@ -36,7 +36,7 @@ export default function ReturnedToast() {
       <Pressable style={styles.toast} onPress={dismissReturnedToast}>
         <Text style={styles.icon}>✅</Text>
         <View style={styles.body}>
-          <Text style={styles.title}>Đã trở lại vùng an toàn</Text>
+          <Text style={styles.title}>Đã trở lại vùng giám sát</Text>
           {returnedToast.geofenceName && (
             <Text style={styles.subtitle}>{returnedToast.geofenceName}</Text>
           )}

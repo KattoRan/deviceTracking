@@ -43,11 +43,6 @@ const TrackingIntervalControl = dynamic(
   { ssr: false },
 );
 
-const FloatingNav = dynamic(
-  () => import("@/components/tracking/FloatingNav"),
-  { ssr: false },
-);
-
 function TrackingPageInner() {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const isTablet = useMediaQuery("(min-width: 768px) and (max-width: 1023px)");
@@ -164,7 +159,7 @@ function TrackingPageInner() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-100">
+    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-100">
       <DeviceSidebar
         devices={devices}
         selectedDevice={selectedDevice}
@@ -186,8 +181,6 @@ function TrackingPageInner() {
             <Menu className="h-5 w-5" />
           </button>
         )}
-
-        <FloatingNav />
 
         <MapView
           devices={mappableDevices}

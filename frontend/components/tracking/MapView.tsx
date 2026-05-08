@@ -199,6 +199,7 @@ export default function MapView({
           device={device}
           btsStations={btsStations}
           showBtsLine={showBtsLines}
+          selected={selectedDevice?.id === device.id}
           onClick={onDeviceClick}
         />
       ))}

@@ -20,8 +20,8 @@ export default function BreachBellButton() {
         accessibilityRole="button"
         accessibilityLabel={
           hasAlert
-            ? 'Có cảnh báo vùng an toàn — bấm để xem chi tiết'
-            : 'Cảnh báo vùng an toàn'
+            ? 'Có cảnh báo vùng giám sát — bấm để xem chi tiết'
+            : 'Cảnh báo vùng giám sát'
         }
         onPress={() => setOpen(true)}
         style={styles.button}

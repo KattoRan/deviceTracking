@@ -62,8 +62,8 @@ export default function GeofenceBanner({
         <View style={styles.body}>
           <Text style={styles.title}>
             {isOutside
-              ? 'Bạn đang ở ngoài vùng an toàn'
-              : 'Đã trở lại vùng an toàn'}
+              ? 'Bạn đang ở ngoài vùng giám sát'
+              : 'Đã trở lại vùng giám sát'}
           </Text>
           <Text style={styles.subtitle}>
             {geofenceName ?? 'Vùng'}

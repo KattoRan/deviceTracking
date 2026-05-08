@@ -34,7 +34,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { name: "Giám sát", icon: MapPin, href: "/tracking" },
   { name: "Lịch sử", icon: History, href: "/history" },
-  { name: "Vùng an toàn", icon: Shield, href: "/geofences" },
+  { name: "Vùng giám sát", icon: Shield, href: "/geofences" },
   { name: "Quản lý", icon: Settings, href: "/manage-devices" },
 ];
 
@@ -78,23 +78,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
     router.replace("/login");
   }
 
-  // The tracking page owns the full viewport (map fills the screen).
-  if (pathname === "/tracking") {
-    return (
-      <GeofenceAlertsProvider>
-        {children}
-        <div className="fixed right-3 top-3 z-[1100]">
-          <GeofenceBell />
-        </div>
-        <GeofenceReturnedToasts />
-      </GeofenceAlertsProvider>
-    );
-  }
-
   return (
     <GeofenceAlertsProvider>
       <div className="min-h-screen bg-slate-50">
-      <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl">
+      <nav className="sticky top-0 z-[1050] border-b border-slate-200 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 md:px-8">
           <div className="flex h-14 items-center justify-between">
             <Link href="/" className="flex items-center gap-2.5">

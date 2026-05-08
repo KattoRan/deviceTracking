@@ -190,8 +190,8 @@ export function GeofenceBell({ className }: { className?: string }) {
         onClick={() => setOpen((v) => !v)}
         aria-label={
           hasAlert
-            ? `Có ${count} thiết bị đang vi phạm vùng an toàn`
-            : "Cảnh báo vùng an toàn"
+            ? `Có ${count} thiết bị đang vi phạm vùng giám sát`
+            : "Cảnh báo vùng giám sát"
         }
         aria-expanded={open}
         title={
@@ -223,7 +223,7 @@ export function GeofenceBell({ className }: { className?: string }) {
         <div className="absolute right-0 top-full z-[1100] mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
           <header className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
             <div className="text-sm font-semibold text-slate-900">
-              Cảnh báo vùng an toàn
+              Cảnh báo vùng giám sát
             </div>
             <span
               className={cn(
@@ -241,7 +241,7 @@ export function GeofenceBell({ className }: { className?: string }) {
             {active.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-slate-500">
                 <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-400" />
-                Tất cả thiết bị đang trong vùng an toàn.
+                Tất cả thiết bị đang trong vùng giám sát.
               </div>
             ) : (
               <ul className="divide-y divide-slate-100">
@@ -295,11 +295,10 @@ export function GeofenceReturnedToasts() {
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
           <div className="min-w-0 flex-1 text-sm">
             <div className="font-semibold">
-              Thiết bị đã trở về vùng an toàn
+              Thiết bị đã trở về vùng giám sát
             </div>
             <div className="mt-0.5 text-[13px]">
-              {t.deviceName ?? t.deviceId.slice(0, 8)} · vùng{" "}
-              <span className="font-medium">{t.geofenceName}</span>
+              {t.deviceName ?? t.deviceId.slice(0, 8)}
             </div>
           </div>
           <button

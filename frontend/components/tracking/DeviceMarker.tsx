@@ -15,25 +15,36 @@ const STATUS_COLOR: Record<Device["status"], string> = {
   offline: "#64748b",
 };
 
-function deviceIcon(status: Device["status"]) {
+function deviceIcon(status: Device["status"], selected: boolean) {
   const color = STATUS_COLOR[status];
+  const size = selected ? 56 : 36;
+  const iconSvg = selected ? 22 : 16;
+  const ring = selected
+    ? "box-shadow:0 4px 14px rgba(15,23,42,0.35),0 0 0 4px #ffffff,0 0 0 7px #f59e0b;"
+    : "box-shadow:0 2px 6px rgba(15,23,42,0.25),0 0 0 2px #ffffff;";
+  const pulse = selected
+    ? `<span style="position:absolute;inset:-10px;border-radius:50%;border:2px solid ${color};opacity:0.6;animation:device-marker-pulse 1.6s ease-out infinite;"></span>`
+    : "";
   return L.divIcon({
     html: `
-      <div style="
-        width:36px;height:36px;border-radius:50%;background:${color};
-        display:flex;align-items:center;justify-content:center;
-        box-shadow:0 2px 6px rgba(15,23,42,0.25),0 0 0 2px #ffffff;
-        border:2px solid #ffffff;
-      ">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
-          <rect x="7" y="2" width="10" height="20" rx="2" stroke="white" stroke-width="2"/>
-          <circle cx="12" cy="18" r="1" fill="white"/>
-        </svg>
+      <div style="position:relative;width:${size}px;height:${size}px;">
+        ${pulse}
+        <div style="
+          position:absolute;inset:0;width:${size}px;height:${size}px;border-radius:50%;background:${color};
+          display:flex;align-items:center;justify-content:center;
+          ${ring}
+          border:2px solid #ffffff;
+        ">
+          <svg viewBox="0 0 24 24" width="${iconSvg}" height="${iconSvg}" fill="none">
+            <rect x="7" y="2" width="10" height="20" rx="2" stroke="white" stroke-width="2"/>
+            <circle cx="12" cy="18" r="1" fill="white"/>
+          </svg>
+        </div>
       </div>`,
     className: "device-marker",
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-    popupAnchor: [0, -18],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 }
 
@@ -41,6 +52,7 @@ interface DeviceMarkerProps {
   device: Device;
   btsStations?: BtsMapStation[];
   showBtsLine?: boolean;
+  selected?: boolean;
   onClick?: (device: Device) => void;
 }
 
@@ -48,6 +60,7 @@ export default function DeviceMarker({
   device,
   btsStations = [],
   showBtsLine = false,
+  selected = false,
   onClick,
 }: DeviceMarkerProps) {
   if (device.latitude == null || device.longitude == null) return null;
@@ -80,7 +93,8 @@ export default function DeviceMarker({
 
       <Marker
         position={[device.latitude, device.longitude]}
-        icon={deviceIcon(device.status)}
+        icon={deviceIcon(device.status, selected)}
+        zIndexOffset={selected ? 1000 : 0}
         eventHandlers={{
           click: (e) => {
             L.DomEvent.stopPropagation(e);

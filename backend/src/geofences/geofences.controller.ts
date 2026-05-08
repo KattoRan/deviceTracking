@@ -37,20 +37,20 @@ export class GeofencesController {
   constructor(private readonly geofencesService: GeofencesService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Tạo vùng an toàn mới' })
+  @ApiOperation({ summary: 'Tạo vùng giám sát mới' })
   create(@Body() dto: CreateGeofenceDto): Promise<GeofenceDetail> {
     return this.geofencesService.create(dto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Danh sách vùng an toàn' })
+  @ApiOperation({ summary: 'Danh sách vùng giám sát' })
   findAll(): Promise<GeofenceListItem[]> {
     return this.geofencesService.findAll();
   }
 
   @Get('breaches/active')
   @ApiOperation({
-    summary: 'Danh sách thiết bị hiện đang ngoài vùng an toàn',
+    summary: 'Danh sách thiết bị hiện đang ngoài vùng giám sát',
   })
   listActiveBreaches(): Promise<GeofenceBreachEvent[]> {
     return this.geofencesService.listActiveBreaches();

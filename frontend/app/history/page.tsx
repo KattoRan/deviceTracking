@@ -91,6 +91,7 @@ function HistoryPageInner() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mapSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +164,15 @@ function HistoryPageInner() {
       setHistory(data);
       if (data.points.length === 0) {
         setError("Không có dữ liệu trong khoảng thời gian này");
+      } else {
+        // Scroll the map into view so the user lands on the result without
+        // having to scroll the long form section above it.
+        requestAnimationFrame(() => {
+          mapSectionRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
       }
     } catch (err) {
       setError("Lỗi tải dữ liệu lịch sử");
@@ -421,8 +431,11 @@ function HistoryPageInner() {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="h-[500px] md:h-[600px]">
+        <div
+          ref={mapSectionRef}
+          className="flex h-[calc(100vh-3.5rem)] scroll-mt-14 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+        >
+          <div className="min-h-0 flex-1">
             <HistoryMap
               points={points}
               currentIndex={currentIndex}

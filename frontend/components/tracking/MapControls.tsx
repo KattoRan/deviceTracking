@@ -62,7 +62,7 @@ export default function MapControls({
       />
       <ControlBtn
         icon={Shield}
-        label="Vùng an toàn"
+        label="Vùng giám sát"
         active={showGeofences}
         onClick={onToggleGeofences}
         activeColor="text-amber-700"

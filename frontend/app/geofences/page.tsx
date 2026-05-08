@@ -187,7 +187,7 @@ export default function GeofencesPage() {
       }
       await refreshGeofences();
     } catch (err) {
-      setError(extractError(err, "Không lưu được vùng an toàn"));
+      setError(extractError(err, "Không lưu được vùng giám sát"));
     } finally {
       setSaving(false);
     }

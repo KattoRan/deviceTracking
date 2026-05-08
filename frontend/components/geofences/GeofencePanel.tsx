@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  ArrowLeft,
   Loader2,
   MapPin,
   Plus,
@@ -90,49 +91,73 @@ export default function GeofencePanel({
     onDraftChange({ ...draft, ...patch });
   }
 
+  const showingDetail = isCreating || !!activeDetail;
+
+  function handleBack() {
+    if (isCreating || isEditingExisting) {
+      onDiscard();
+    } else {
+      onSelect(null);
+    }
+  }
+
+  const detailTitle = isCreating
+    ? "Tạo vùng mới"
+    : isEditingExisting
+      ? "Chỉnh sửa vùng"
+      : (activeDetail?.name ?? "Chi tiết vùng");
+
   return (
     <aside className="flex h-full w-full flex-col border-r border-slate-200 bg-white md:w-96">
-      <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-emerald-600" />
-          <h2 className="text-base font-semibold text-slate-900">
-            Vùng an toàn
+      {showingDetail ? (
+        <header className="flex items-center gap-2 border-b border-slate-200 px-3 py-3">
+          <button
+            type="button"
+            onClick={handleBack}
+            aria-label="Quay lại danh sách"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <h2 className="min-w-0 truncate text-base font-semibold text-slate-900">
+            {detailTitle}
           </h2>
-        </div>
-        <button
-          type="button"
-          onClick={onCreateNew}
-          disabled={isCreating}
-          className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Tạo vùng
-        </button>
-      </header>
+        </header>
+      ) : (
+        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-emerald-600" />
+            <h2 className="text-base font-semibold text-slate-900">
+              Vùng giám sát
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onCreateNew}
+            className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Tạo vùng
+          </button>
+        </header>
+      )}
 
       <div className="flex-1 overflow-y-auto">
-        {/* List */}
-        <div className="border-b border-slate-200">
-          {geofences.length === 0 && !isCreating && (
-            <div className="px-4 py-8 text-center text-sm text-slate-500">
-              Chưa có vùng nào. Bấm <span className="font-medium">Tạo vùng</span>{" "}
-              để bắt đầu.
-            </div>
-          )}
-          <ul className="divide-y divide-slate-100">
-            {geofences.map((g) => {
-              const active = activeDetail?.id === g.id;
-              return (
+        {!showingDetail && (
+          <div>
+            {geofences.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">
+                Chưa có vùng nào. Bấm <span className="font-medium">Tạo vùng</span>{" "}
+                để bắt đầu.
+              </div>
+            )}
+            <ul className="divide-y divide-slate-100">
+              {geofences.map((g) => (
                 <li key={g.id}>
                   <button
                     type="button"
-                    onClick={() => onSelect(active ? null : g.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors",
-                      active
-                        ? "bg-emerald-50"
-                        : "hover:bg-slate-50",
-                    )}
+                    onClick={() => onSelect(g.id)}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-slate-50"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium text-slate-900">
@@ -142,21 +167,15 @@ export default function GeofencePanel({
                         Bán kính {g.radiusM}m · {g.deviceCount} thiết bị
                       </div>
                     </div>
-                    <MapPin
-                      className={cn(
-                        "h-4 w-4 shrink-0",
-                        active ? "text-emerald-600" : "text-slate-400",
-                      )}
-                    />
+                    <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
                   </button>
                 </li>
-              );
-            })}
-          </ul>
-        </div>
+              ))}
+            </ul>
+          </div>
+        )}
 
-        {/* Form / Detail */}
-        {(isCreating || activeDetail) && (
+        {showingDetail && (
           <div className="space-y-4 px-4 py-4">
             {isCreating && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
