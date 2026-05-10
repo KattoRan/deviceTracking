@@ -11,11 +11,9 @@ import {
   MapPin,
   Radio,
   Search,
-  Signal,
   Smartphone,
   Trash2,
   User,
-  Users,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -76,12 +74,6 @@ export default function ManageDevicesPage() {
     [],
   );
 
-  const stats = useMemo(() => {
-    const total = devices.length;
-    const online = devices.filter((d) => d.status === "online").length;
-    return { total, online, offline: total - online };
-  }, [devices]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return devices.filter((d) => {
@@ -119,27 +111,6 @@ export default function ManageDevicesPage() {
           </p>
         </div>
       </header>
-
-      <div className="mb-6 grid grid-cols-3 gap-3 md:gap-4">
-        <StatsCard
-          label="Tổng"
-          value={stats.total}
-          icon={Users}
-          accent="bg-slate-100 text-slate-700"
-        />
-        <StatsCard
-          label="Trực tuyến"
-          value={stats.online}
-          icon={Signal}
-          accent="bg-emerald-50 text-emerald-700"
-        />
-        <StatsCard
-          label="Ngoại tuyến"
-          value={stats.offline}
-          icon={Clock}
-          accent="bg-slate-100 text-slate-500"
-        />
-      </div>
 
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="relative flex-1 md:max-w-md">
@@ -214,32 +185,6 @@ export default function ManageDevicesPage() {
         />
       )}
     </main>
-  );
-}
-
-function StatsCard({
-  label,
-  value,
-  icon: Icon,
-  accent,
-}: {
-  label: string;
-  value: number;
-  icon: typeof Users;
-  accent: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-3">
-        <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", accent)}>
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <p className="text-xs text-slate-500">{label}</p>
-          <p className="text-xl font-semibold text-slate-900">{value}</p>
-        </div>
-      </div>
-    </div>
   );
 }
 

@@ -138,7 +138,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function useGeofenceAlerts(): GeofenceAlertsContextValue {
+export function useGeofenceAlerts(): GeofenceAlertsContextValue {
   const ctx = useContext(GeofenceAlertsContext);
   if (!ctx) {
     throw new Error(
