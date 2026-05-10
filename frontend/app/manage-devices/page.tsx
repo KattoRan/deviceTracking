@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -12,11 +13,12 @@ import {
   Search,
   Signal,
   Smartphone,
+  Trash2,
   User,
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import deviceService from "@/services/deviceService";
 import type { Device, DeviceDetail } from "@/types/device";
 import { cn } from "@/lib/utils";
@@ -49,25 +51,30 @@ export default function ManageDevicesPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDevices = useCallback(async () => {
     setLoading(true);
-    deviceService
-      .getAll()
-      .then((data) => {
-        if (!cancelled) setDevices(data);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "Không tải được danh sách");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setError(null);
+    try {
+      const data = await deviceService.getAll();
+      setDevices(data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Không tải được danh sách");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadDevices();
+  }, [loadDevices]);
+
+  const handleDeleted = useCallback(
+    (id: string) => {
+      setDevices((prev) => prev.filter((d) => d.id !== id));
+      setSelectedId(null);
+    },
+    [],
+  );
 
   const stats = useMemo(() => {
     const total = devices.length;
@@ -203,6 +210,7 @@ export default function ManageDevicesPage() {
         <DetailDrawer
           deviceId={selectedId}
           onClose={() => setSelectedId(null)}
+          onDeleted={handleDeleted}
         />
       )}
     </main>
@@ -418,13 +426,18 @@ function Pagination({
 function DetailDrawer({
   deviceId,
   onClose,
+  onDeleted,
 }: {
   deviceId: string;
   onClose: () => void;
+  onDeleted: (id: string) => void;
 }) {
   const [detail, setDetail] = useState<DeviceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -447,6 +460,18 @@ function DetailDrawer({
       cancelled = true;
     };
   }, [deviceId]);
+
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deviceService.remove(deviceId);
+      onDeleted(deviceId);
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Không xoá được thiết bị");
+      setDeleting(false);
+    }
+  };
 
   const online = detail?.status === "online";
 
@@ -575,24 +600,118 @@ function DetailDrawer({
           </div>
         ) : null}
 
-        <div className="sticky bottom-0 flex gap-2 border-t border-slate-200 bg-white p-3">
-          <Link
-            href={`/tracking?deviceId=${deviceId}`}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+        <div className="sticky bottom-0 space-y-2 border-t border-slate-200 bg-white p-3">
+          <div className="flex gap-2">
+            <Link
+              href={`/tracking?deviceId=${deviceId}`}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              <MapPin className="h-4 w-4" />
+              Xem trên bản đồ
+            </Link>
+            <Link
+              href={`/history?deviceId=${deviceId}`}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <History className="h-4 w-4" />
+              Xem lịch sử
+            </Link>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setConfirmingDelete(true);
+            }}
+            disabled={loading || !detail}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <MapPin className="h-4 w-4" />
-            Xem trên bản đồ
-          </Link>
-          <Link
-            href={`/history?deviceId=${deviceId}`}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <History className="h-4 w-4" />
-            Xem lịch sử
-          </Link>
+            <Trash2 className="h-4 w-4" />
+            Huỷ thiết bị
+          </button>
         </div>
       </aside>
+      {confirmingDelete && (
+        <DeleteConfirmModal
+          deviceName={detail?.owner?.full_name || detail?.phone_number || deviceId}
+          deleting={deleting}
+          error={deleteError}
+          onCancel={() => {
+            if (deleting) return;
+            setConfirmingDelete(false);
+            setDeleteError(null);
+          }}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
     </>
+  );
+}
+
+function DeleteConfirmModal({
+  deviceName,
+  deleting,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  deviceName: string;
+  deleting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-slate-900">
+              Huỷ đăng ký thiết bị?
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Thiết bị <span className="font-medium text-slate-900">{deviceName}</span>{" "}
+              cùng toàn bộ lịch sử di chuyển và dữ liệu liên quan sẽ bị xoá vĩnh
+              viễn. Người dùng cũng sẽ bị xoá nếu không còn thiết bị nào khác.
+              Hành động không thể hoàn tác.
+            </p>
+          </div>
+        </div>
+        {error && (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={deleting}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Huỷ
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={deleting}
+            className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {deleting ? "Đang xoá..." : "Xoá thiết bị"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

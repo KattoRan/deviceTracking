@@ -68,6 +68,10 @@ export default function TrackingScreen() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isActiveRef = useRef(false);
+  // Once-per-mount guard so the auto-start effect doesn't re-fire when
+  // unrelated callback deps (permission state, sendTelemetry identity, …)
+  // change. A fresh mount — e.g. after re-registering — resets it to false.
+  const autoStartedRef = useRef(false);
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
@@ -142,6 +146,16 @@ export default function TrackingScreen() {
     disconnectMqtt();
     setIsActive(false);
   }, [stopWatching]);
+
+  // Auto-start tracking the moment the screen has a deviceId — there is no
+  // longer a Home screen between Register and Tracking, so the user lands
+  // here directly and expects monitoring to be running already.
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (!storedData?.deviceId) return;
+    autoStartedRef.current = true;
+    void startTracking();
+  }, [storedData?.deviceId, startTracking]);
 
   // (Re)create the periodic timer whenever isActive flips or the global
   // interval changes — this is how the remote `tracking_interval_changed`

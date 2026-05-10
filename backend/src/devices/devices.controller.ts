@@ -9,8 +9,10 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
@@ -18,6 +20,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { GeofenceBreachEvent } from '../events/events.gateway';
 import { DevicesService } from './devices.service';
 import { HistoryQueryDto } from './dto/history-query.dto';
@@ -79,9 +82,12 @@ export class DevicesController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
-    summary: 'Hủy đăng ký thiết bị (cascade xoá lịch sử; xoá user nếu không còn thiết bị nào khác)',
+    summary:
+      'Admin huỷ đăng ký thiết bị (cascade xoá lịch sử; xoá user nếu không còn thiết bị nào khác)',
   })
   @ApiNoContentResponse({ description: 'Đã xoá' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })

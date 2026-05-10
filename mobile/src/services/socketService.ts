@@ -3,6 +3,7 @@ import { SOCKET_CONFIG } from '../config/api';
 import type {
   CommandDispatchEvent,
   CommandResultBody,
+  DeviceDeletedEvent,
   DeviceMovedEvent,
   GeofenceBreachEvent,
   TrackingIntervalChangedEvent,
@@ -12,6 +13,7 @@ type DeviceMovedCallback = (event: DeviceMovedEvent) => void;
 type CommandCallback = (event: CommandDispatchEvent) => void;
 type TrackingIntervalCallback = (event: TrackingIntervalChangedEvent) => void;
 type GeofenceBreachCallback = (event: GeofenceBreachEvent) => void;
+type DeviceDeletedCallback = (event: DeviceDeletedEvent) => void;
 
 let socket: Socket | null = null;
 let joinedDeviceId: string | null = null;
@@ -19,6 +21,7 @@ const deviceMovedListeners = new Set<DeviceMovedCallback>();
 const commandListeners = new Set<CommandCallback>();
 const trackingIntervalListeners = new Set<TrackingIntervalCallback>();
 const geofenceBreachListeners = new Set<GeofenceBreachCallback>();
+const deviceDeletedListeners = new Set<DeviceDeletedCallback>();
 
 function fanOut<T>(listeners: Set<(event: T) => void>, event: T): void {
   for (const cb of listeners) {
@@ -71,6 +74,9 @@ export function connectSocket(): Socket {
   );
   socket.on('geofence_breach', (event: GeofenceBreachEvent) =>
     fanOut(geofenceBreachListeners, event),
+  );
+  socket.on('device_deleted', (event: DeviceDeletedEvent) =>
+    fanOut(deviceDeletedListeners, event),
   );
 
   // Re-join the device room on every connect/reconnect — socket.io rooms are
@@ -138,6 +144,14 @@ export function onGeofenceBreach(cb: GeofenceBreachCallback): () => void {
   geofenceBreachListeners.add(cb);
   return () => {
     geofenceBreachListeners.delete(cb);
+  };
+}
+
+export function onDeviceDeleted(cb: DeviceDeletedCallback): () => void {
+  if (!socket) connectSocket();
+  deviceDeletedListeners.add(cb);
+  return () => {
+    deviceDeletedListeners.delete(cb);
   };
 }
 

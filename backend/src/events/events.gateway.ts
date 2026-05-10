@@ -58,6 +58,10 @@ export interface TrackingIntervalChangedEvent {
   updatedAt: string;
 }
 
+export interface DeviceDeletedEvent {
+  deviceId: string;
+}
+
 export interface GeofenceBreachEvent {
   deviceId: string;
   deviceName: string | null;
@@ -186,5 +190,14 @@ export class EventsGateway
    */
   emitGeofenceBreach(event: GeofenceBreachEvent) {
     this.server.emit('geofence_breach', event);
+  }
+
+  /**
+   * Emitted when an admin deletes a device. The owning mobile client uses
+   * this to wipe its local registration and route back to the Register
+   * screen; dashboards use it to refresh their device list.
+   */
+  emitDeviceDeleted(event: DeviceDeletedEvent) {
+    this.server.emit('device_deleted', event);
   }
 }

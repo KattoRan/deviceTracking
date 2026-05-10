@@ -114,6 +114,10 @@ export interface GeofenceBreachEvent {
   timestamp: string;
 }
 
+export interface DeviceDeletedEvent {
+  deviceId: string;
+}
+
 export interface CommandResultBody {
   commandId: string;
   success: boolean;
@@ -128,7 +132,6 @@ export interface TrackingIntervalResponse {
 
 export type RootStackParamList = {
   Register: undefined;
-  Home: undefined;
   Tracking: undefined;
 };
 

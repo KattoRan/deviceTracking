@@ -1,5 +1,3 @@
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,17 +17,13 @@ import {
   EMAIL_REGEX,
   PHONE_REGEX,
   type RegisterDeviceRequest,
-  type RootStackParamList,
 } from '../models/types';
 import { ApiError, registerDevice } from '../services/apiService';
-
-type Nav = NativeStackNavigationProp<RootStackParamList, 'Register'>;
 
 type Field = 'fullName' | 'email' | 'citizenId' | 'phoneNumber';
 type Errors = Partial<Record<Field, string>>;
 
 export default function RegisterScreen() {
-  const navigation = useNavigation<Nav>();
   const { deviceModel, deviceOS, deviceType, saveDeviceData } = useDeviceInfo();
 
   const [fullName, setFullName] = useState('');
@@ -79,6 +73,8 @@ export default function RegisterScreen() {
 
     try {
       const { userId, deviceId } = await registerDevice(payload);
+      // saveDeviceData flips registrationStatus → 'registered'; the auth-style
+      // navigator in App.tsx then swaps to the Tracking screen on its own.
       await saveDeviceData({
         userId,
         deviceId,
@@ -86,7 +82,6 @@ export default function RegisterScreen() {
         email: payload.email,
         registeredAt: new Date().toISOString(),
       });
-      navigation.replace('Home');
     } catch (err) {
       const message =
         err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Lỗi không xác định';

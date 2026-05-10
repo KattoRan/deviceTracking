@@ -49,6 +49,10 @@ export const deviceService = {
     );
     return data;
   },
+
+  remove: async (id: string): Promise<void> => {
+    await apiClient.delete(`api/v1/devices/${id}`);
+  },
 };
 
 export default deviceService;

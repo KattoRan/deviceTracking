@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { GeofenceBreachEvent } from '../events/events.gateway';
+import { EventsGateway, type GeofenceBreachEvent } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
@@ -28,6 +28,7 @@ export class DevicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly geofenceState: GeofenceStateService,
+    private readonly events: EventsGateway,
   ) {}
 
   /**
@@ -242,6 +243,10 @@ export class DevicesService {
         await tx.users.delete({ where: { id: device.user_id } });
       }
     });
+
+    // Notify the mobile client (so it can wipe local state and return to
+    // the Register screen) and any dashboards listening for list refreshes.
+    this.events.emitDeviceDeleted({ deviceId: id });
 
     this.logger.log(`Deleted device=${id}`);
   }
