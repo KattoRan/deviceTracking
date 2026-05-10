@@ -1,6 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Platform } from 'react-native';
 import type { RegistrationStatus, StoredDeviceData } from '../models/types';
 
@@ -29,7 +37,7 @@ const DEVICE_TYPE_LABEL: Record<number, string> = {
   [Device.DeviceType.UNKNOWN]: 'unknown',
 };
 
-interface UseDeviceInfoResult {
+interface DeviceInfoContextValue {
   registrationStatus: RegistrationStatus;
   storedData: StoredDeviceData | null;
   deviceModel: string;
@@ -39,7 +47,16 @@ interface UseDeviceInfoResult {
   clearDeviceData: () => Promise<void>;
 }
 
-export function useDeviceInfo(): UseDeviceInfoResult {
+const DeviceInfoContext = createContext<DeviceInfoContextValue | null>(null);
+
+/**
+ * Owns the single source of truth for registration state. Must wrap the app
+ * so that App, RegisterScreen, and TrackingScreen all read/write the same
+ * `registrationStatus` — without the shared store, RegisterScreen's
+ * `saveDeviceData` would only flip its local copy and the auth-state
+ * navigator in App.tsx would never switch screens.
+ */
+export function DeviceInfoProvider({ children }: { children: ReactNode }) {
   const [registrationStatus, setRegistrationStatus] =
     useState<RegistrationStatus>('loading');
   const [storedData, setStoredData] = useState<StoredDeviceData | null>(null);
@@ -89,7 +106,7 @@ export function useDeviceInfo(): UseDeviceInfoResult {
     setRegistrationStatus('not_registered');
   }, []);
 
-  return {
+  const value: DeviceInfoContextValue = {
     registrationStatus,
     storedData,
     deviceModel,
@@ -98,4 +115,14 @@ export function useDeviceInfo(): UseDeviceInfoResult {
     saveDeviceData,
     clearDeviceData,
   };
+
+  return createElement(DeviceInfoContext.Provider, { value }, children);
+}
+
+export function useDeviceInfo(): DeviceInfoContextValue {
+  const ctx = useContext(DeviceInfoContext);
+  if (!ctx) {
+    throw new Error('useDeviceInfo must be used inside <DeviceInfoProvider>');
+  }
+  return ctx;
 }

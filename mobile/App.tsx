@@ -8,7 +8,7 @@ import BreachBellButton from './src/components/BreachBellButton';
 import LockOverlay from './src/components/LockOverlay';
 import ReturnedToast from './src/components/ReturnedToast';
 import { GeofenceAlertProvider } from './src/contexts/GeofenceAlertContext';
-import { useDeviceInfo } from './src/hooks/useDeviceInfo';
+import { DeviceInfoProvider, useDeviceInfo } from './src/hooks/useDeviceInfo';
 import type { CommandDispatchEvent, RootStackParamList } from './src/models/types';
 import {
   ackCommand,
@@ -26,6 +26,18 @@ import TrackingScreen from './src/screens/TrackingScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
+  // The provider must sit above every consumer so that state set by
+  // RegisterScreen (saveDeviceData) is visible to the auth-state branch
+  // below in AppContent — without the wrapper, each useDeviceInfo() call
+  // would own its own useState and updates wouldn't cross components.
+  return (
+    <DeviceInfoProvider>
+      <AppContent />
+    </DeviceInfoProvider>
+  );
+}
+
+function AppContent() {
   const { registrationStatus, storedData, clearDeviceData } = useDeviceInfo();
   const [lockMessage, setLockMessage] = useState<string | null>(null);
 
