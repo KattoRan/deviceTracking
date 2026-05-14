@@ -19,6 +19,7 @@ import type {
   CommandDispatchEvent,
   DeviceMovedEvent,
   IngestPayload,
+  LocationData,
 } from '../models/types';
 import { fetchTrackingInterval, sendIngestData } from '../services/apiService';
 import {
@@ -41,6 +42,30 @@ import {
 } from '../services/socketService';
 
 const MAX_EVENTS = 10;
+
+// Adaptive heartbeat constants.
+// Two consecutive sent fixes within STATIONARY_THRESHOLD_M of each other
+// count toward "stationary". After STATIONARY_ENTER_TICKS such sends we
+// downshift the effective send rate to STATIONARY_HEARTBEAT_MS — but never
+// *slower* than the operator-set base interval. So if the operator picks
+// 60s, stationary mode is a no-op (60s already > 30s heartbeat target).
+// Any new fix further than the threshold immediately breaks us out.
+const STATIONARY_THRESHOLD_M = 5;
+const STATIONARY_ENTER_TICKS = 3;
+const STATIONARY_HEARTBEAT_MS = 30_000;
+
+function haversineMeters(a: LocationData, b: LocationData): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
 
 export default function TrackingScreen() {
   const { storedData } = useDeviceInfo();
@@ -72,9 +97,20 @@ export default function TrackingScreen() {
   // unrelated callback deps (permission state, sendTelemetry identity, …)
   // change. A fresh mount — e.g. after re-registering — resets it to false.
   const autoStartedRef = useRef(false);
+  // Mirror the latest watcher fix so the periodic timer can read it
+  // without re-calling getCurrentPositionAsync — the GPS chip is already
+  // streaming via watchPositionAsync; we only need a fresh one-shot read
+  // on explicit triggers (start, resume, on-demand command).
+  const locationRef = useRef<LocationData | null>(null);
+  const lastSentLocationRef = useRef<LocationData | null>(null);
+  const stationaryTicksRef = useRef(0);
+  const tickCountRef = useRef(0);
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
+  useEffect(() => {
+    locationRef.current = location;
+  }, [location]);
 
   const fetchCellTowers = useCallback(async (): Promise<CellTower[]> => {
     const towers = await getCellTowerInfo();
@@ -82,12 +118,18 @@ export default function TrackingScreen() {
     return towers;
   }, []);
 
-  const sendTelemetry = useCallback(async () => {
+  const sendTelemetry = useCallback(async (options: { forceFresh?: boolean } = {}) => {
     if (!storedData?.deviceId) return null;
     setSending(true);
 
     try {
-      const current = await refreshLocation();
+      // Periodic ticks reuse the watcher's cached fix — only force a fresh
+      // GPS read on explicit triggers, or when the watcher hasn't produced
+      // a fix yet (first tick after start).
+      const current =
+        options.forceFresh || !locationRef.current
+          ? await refreshLocation()
+          : locationRef.current;
       if (!current) {
         setSendError('Không lấy được vị trí');
         return null;
@@ -100,6 +142,17 @@ export default function TrackingScreen() {
       if (!sentOverMqtt) {
         await sendIngestData(storedData.deviceId, payload);
       }
+
+      const previousSent = lastSentLocationRef.current;
+      if (previousSent) {
+        const distance = haversineMeters(current, previousSent);
+        if (distance < STATIONARY_THRESHOLD_M) {
+          stationaryTicksRef.current += 1;
+        } else {
+          stationaryTicksRef.current = 0;
+        }
+      }
+      lastSentLocationRef.current = current;
 
       setLastSentAt(new Date());
       setSendCount((n) => n + 1);
@@ -129,11 +182,14 @@ export default function TrackingScreen() {
     const watching = await startWatching();
     if (!watching) return false;
 
+    lastSentLocationRef.current = null;
+    stationaryTicksRef.current = 0;
+    tickCountRef.current = 0;
     setIsActive(true);
     setSendError(null);
 
     // Fire once immediately so the user sees progress without waiting a cycle.
-    await sendTelemetry();
+    await sendTelemetry({ forceFresh: true });
     return true;
   }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry]);
 
@@ -163,8 +219,30 @@ export default function TrackingScreen() {
   useEffect(() => {
     if (!isActive) return;
     if (intervalRef.current) clearInterval(intervalRef.current);
+    // How many ticks must elapse between sends while stationary so the
+    // effective rate is ≈ STATIONARY_HEARTBEAT_MS. If the operator-set
+    // interval is already ≥ heartbeat target, ratio collapses to 1 → no
+    // skipping (we never *slow down* below the operator's requested rate).
+    const stationaryHeartbeatRatio = Math.max(
+      1,
+      Math.ceil(STATIONARY_HEARTBEAT_MS / intervalMs),
+    );
     intervalRef.current = setInterval(() => {
-      void sendTelemetry();
+      tickCountRef.current += 1;
+      const inStationary =
+        stationaryTicksRef.current >= STATIONARY_ENTER_TICKS;
+      const latest = locationRef.current;
+      const lastSent = lastSentLocationRef.current;
+      const movedSinceLastSend =
+        latest != null &&
+        lastSent != null &&
+        haversineMeters(latest, lastSent) >= STATIONARY_THRESHOLD_M;
+      const isHeartbeatTick =
+        tickCountRef.current % stationaryHeartbeatRatio === 0;
+      const shouldSend = !inStationary || movedSinceLastSend || isHeartbeatTick;
+      if (shouldSend) {
+        void sendTelemetry();
+      }
     }, intervalMs);
     return () => {
       if (intervalRef.current) {
@@ -204,7 +282,7 @@ export default function TrackingScreen() {
     return onCommand(async (event: CommandDispatchEvent) => {
       if (event.command === 'request_location_now') {
         ackCommand(event.commandId);
-        const current = await sendTelemetry();
+        const current = await sendTelemetry({ forceFresh: true });
         if (current) {
           sendCommandResult({
             commandId: event.commandId,
@@ -266,7 +344,7 @@ export default function TrackingScreen() {
       const prev = appStateRef.current;
       appStateRef.current = next;
       if (isActive && prev.match(/inactive|background/) && next === 'active') {
-        void sendTelemetry();
+        void sendTelemetry({ forceFresh: true });
       }
     });
     return () => sub.remove();

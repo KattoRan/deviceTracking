@@ -1,6 +1,11 @@
 import * as Location from 'expo-location';
 import type { LocationData } from '../models/types';
 
+// Fixes with horizontal accuracy radius worse than this (in metres) are
+// treated as too noisy to act on — typically indoor GPS or initial cold-start
+// readings where the receiver hasn't converged yet.
+const MAX_ACCEPTABLE_ACCURACY_M = 100;
+
 export class LocationPermissionError extends Error {
   constructor() {
     super('Chưa được cấp quyền truy cập vị trí');
@@ -29,7 +34,11 @@ export async function getCurrentLocation(): Promise<LocationData> {
   const { coords } = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.High,
   });
-  return { latitude: coords.latitude, longitude: coords.longitude };
+  return {
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    accuracy: coords.accuracy ?? undefined,
+  };
 }
 
 export interface LocationWatcher {
@@ -51,7 +60,19 @@ export async function watchLocation(
         timeInterval: 10_000, // Android only
       },
       ({ coords }) => {
-        onLocation({ latitude: coords.latitude, longitude: coords.longitude });
+        // Drop fixes with poor accuracy — they cause phantom "jumps" on
+        // the map and pollute the stationary detector downstream.
+        if (
+          coords.accuracy != null &&
+          coords.accuracy > MAX_ACCEPTABLE_ACCURACY_M
+        ) {
+          return;
+        }
+        onLocation({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy ?? undefined,
+        });
       },
     );
     return { remove: () => subscription.remove() };

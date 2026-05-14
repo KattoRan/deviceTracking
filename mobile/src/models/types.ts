@@ -29,6 +29,7 @@ export type RegistrationStatus = 'loading' | 'registered' | 'not_registered';
 export interface LocationData {
   latitude: number;
   longitude: number;
+  accuracy?: number;
 }
 
 export interface CellTower {
