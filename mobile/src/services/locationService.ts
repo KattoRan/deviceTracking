@@ -31,13 +31,14 @@ export async function checkLocationPermission(): Promise<boolean> {
 export async function getCurrentLocation(): Promise<LocationData> {
   const granted = await checkLocationPermission();
   if (!granted) throw new LocationPermissionError();
-  const { coords } = await Location.getCurrentPositionAsync({
+  const { coords, timestamp } = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.High,
   });
   return {
     latitude: coords.latitude,
     longitude: coords.longitude,
     accuracy: coords.accuracy ?? undefined,
+    timestamp: timestamp ?? Date.now(),
   };
 }
 
@@ -59,9 +60,8 @@ export async function watchLocation(
         distanceInterval: 10, // metres
         timeInterval: 10_000, // Android only
       },
-      ({ coords }) => {
-        // Drop fixes with poor accuracy — they cause phantom "jumps" on
-        // the map and pollute the stationary detector downstream.
+      ({ coords, timestamp }) => {
+        // Drop fixes with poor accuracy — they cause phantom "jumps" on the map.
         if (
           coords.accuracy != null &&
           coords.accuracy > MAX_ACCEPTABLE_ACCURACY_M
@@ -72,6 +72,7 @@ export async function watchLocation(
           latitude: coords.latitude,
           longitude: coords.longitude,
           accuracy: coords.accuracy ?? undefined,
+          timestamp: timestamp ?? Date.now(),
         });
       },
     );

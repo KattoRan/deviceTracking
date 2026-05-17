@@ -50,7 +50,7 @@ export class IngestService {
     dto: SubmitDataDto,
   ): Promise<{ success: true; message: string }> {
     if (!deviceId) throw new BadRequestException('Missing device id');
-    if (!dto?.location) throw new BadRequestException('Missing location');
+    if (!dto?.locations?.length) throw new BadRequestException('Missing locations');
 
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
@@ -65,7 +65,12 @@ export class IngestService {
     });
     if (!device) throw new NotFoundException('Device not found');
 
-    const now = new Date();
+    // The client guarantees locations are ordered oldest → newest, so the
+    // latest fix is the last element. We use this for all "current state"
+    // computations (realtime broadcast, geofence eval, last_seen) while
+    // every fix in the batch — including this one — gets persisted.
+    const latest = dto.locations[dto.locations.length - 1];
+    const latestAt = new Date(latest.timestamp);
 
     const validCells = (dto.cellTowers ?? []).filter(isValidCell);
     const cells = validCells.length > 0 ? markServingCell(validCells) : [];
@@ -103,12 +108,12 @@ export class IngestService {
 
     this.eventsGateway.emitDeviceMoved({
       deviceId,
-      lat: dto.location.latitude,
-      lon: dto.location.longitude,
+      lat: latest.latitude,
+      lon: latest.longitude,
       cid: servingCell?.cid ?? null,
       lac: servingCell?.lac ?? null,
       signalDbm: servingCell?.signalDbm ?? null,
-      timestamp: now.toISOString(),
+      timestamp: latestAt.toISOString(),
       cellTowers: cells.map((c) => ({
         type: c.type,
         mcc: c.mcc,
@@ -123,17 +128,17 @@ export class IngestService {
       connectedBts,
     });
 
-    void this.persistInBackground(deviceId, dto.location, cells, now);
+    void this.persistInBackground(deviceId, dto.locations, cells, latestAt);
     if (servingCell) void this.lookupBtsInBackground(servingCell);
 
     if (device.geofence) {
       void this.evaluateGeofence(
         deviceId,
         device.user?.full_name ?? device.phone_number,
-        dto.location.latitude,
-        dto.location.longitude,
+        latest.latitude,
+        latest.longitude,
         device.geofence,
-        now,
+        latestAt,
       );
     }
 
@@ -212,27 +217,34 @@ export class IngestService {
 
   private async persistInBackground(
     deviceId: string,
-    location: { latitude: number; longitude: number },
+    locations: { latitude: number; longitude: number; timestamp: number }[],
     cells: NormalizedCell[],
-    now: Date,
+    latestAt: Date,
   ): Promise<void> {
     try {
+      const latest = locations[locations.length - 1];
+      // Reverse-geocode only the latest fix — running it for every point in
+      // a batch would burn the LocationIQ quota and almost never produce a
+      // different district within a ≤60s window.
       const addressPromise = this.reverseGeocode(
-        location.latitude,
-        location.longitude,
+        latest.latitude,
+        latest.longitude,
       );
 
       await this.prisma.$transaction(async (tx) => {
-        await tx.location_history.create({
-          data: {
+        await tx.location_history.createMany({
+          data: locations.map((loc) => ({
             device_id: deviceId,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            recorded_at: now,
-          },
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            recorded_at: new Date(loc.timestamp),
+          })),
         });
 
         if (cells.length > 0) {
+          // Cell info is sampled once per batch on the device (cell query is
+          // slow). Attribute it to the latest fix's time so it lines up with
+          // the realtime broadcast and the device's current state.
           await tx.cell_tower_history.createMany({
             data: cells.map((c) => ({
               device_id: deviceId,
@@ -245,21 +257,21 @@ export class IngestService {
               signal_dbm: c.signalDbm,
               pci: c.pci ?? null,
               is_serving: c.isServing,
-              recorded_at: now,
+              recorded_at: latestAt,
             })),
           });
         }
 
         await tx.devices.update({
           where: { id: deviceId },
-          data: { last_seen: now },
+          data: { last_seen: latestAt },
         });
       });
 
       const address = await addressPromise;
       if (address) {
         await this.prisma.location_history.updateMany({
-          where: { device_id: deviceId, recorded_at: now },
+          where: { device_id: deviceId, recorded_at: latestAt },
           data: { district: address },
         });
       }

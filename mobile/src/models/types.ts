@@ -30,6 +30,10 @@ export interface LocationData {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  // Epoch ms when this fix was produced by the OS (or when refreshLocation
+  // synthesised it). Preserved end-to-end so the server can rebuild the
+  // intra-batch trajectory instead of stamping everything with `now`.
+  timestamp: number;
 }
 
 export interface CellTower {
@@ -50,7 +54,10 @@ export interface CellTower {
 }
 
 export interface IngestPayload {
-  location: LocationData;
+  // Trajectory of fixes accumulated during one send window, ordered oldest
+  // → newest. Always at least one element — when the watcher produced no
+  // fresh fix in the window we resend the last known one as heartbeat.
+  locations: LocationData[];
   cellTowers: CellTower[];
 }
 

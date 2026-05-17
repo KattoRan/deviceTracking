@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsInt,
@@ -18,6 +19,15 @@ export class LocationDto {
   @ApiProperty({ example: 105.804817 })
   @IsNumber()
   longitude: number;
+
+  /**
+   * Epoch ms when the fix was produced on the device. Carried through
+   * batched payloads so we can persist the actual trajectory order/spacing
+   * instead of stamping every fix with `received_at`.
+   */
+  @ApiProperty({ example: 1731000000000 })
+  @IsInt()
+  timestamp: number;
 }
 
 export class CellTowerDto {
@@ -50,10 +60,19 @@ export class CellTowerDto {
 }
 
 export class SubmitDataDto {
-  @ApiProperty({ type: LocationDto })
-  @ValidateNested()
+  /**
+   * Ordered oldest → newest. Every watcher fix observed during one send
+   * window is shipped in one payload, so the server can reconstruct the
+   * trajectory between ticks rather than only seeing the latest point.
+   * Always at least one element — the mobile client falls back to the
+   * last known fix as a single-element heartbeat when the user is still.
+   */
+  @ApiProperty({ type: [LocationDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
   @Type(() => LocationDto)
-  location: LocationDto;
+  locations: LocationDto[];
 
   @ApiPropertyOptional({ type: [CellTowerDto] })
   @IsOptional()
