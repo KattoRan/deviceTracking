@@ -79,9 +79,15 @@ async function ensurePhoneStatePermission(): Promise<boolean> {
   return phoneStateGranted;
 }
 
+// Defence in depth: native module already filters Int.MAX_VALUE
+// (CellInfo.UNAVAILABLE = 2147483647), but reject any out-of-range dBm here
+// too in case a future native change leaks it through.
+const isValidDbm = (v: number | null | undefined): v is number =>
+  typeof v === 'number' && v < 0 && v >= -160;
+
 function normalize(raw: NativeCellInfo): CellTower | null {
   if (!raw.mcc || !raw.mnc || !raw.lac || !raw.cid) return null;
-  if (raw.signalDbm == null) return null;
+  if (!isValidDbm(raw.signalDbm)) return null;
   return {
     type: raw.type,
     mcc: raw.mcc,
@@ -89,7 +95,7 @@ function normalize(raw: NativeCellInfo): CellTower | null {
     lac: raw.lac,
     cid: raw.cid,
     signalDbm: raw.signalDbm,
-    rssi: raw.rssi ?? undefined,
+    rssi: isValidDbm(raw.rssi) ? raw.rssi : undefined,
     pci: raw.pci ?? undefined,
     isRegistered: raw.isRegistered,
   };
