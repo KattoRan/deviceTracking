@@ -26,10 +26,15 @@ export interface StoredDeviceData {
 
 export type RegistrationStatus = 'loading' | 'registered' | 'not_registered';
 
+export type LocationQuality = 'gps' | 'approx' | 'network';
+
 export interface LocationData {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  // Quality tier derived from `accuracy`. Producers tag every fix; consumers
+  // (polyline render, geofence eval, …) decide which tiers to honour.
+  quality?: LocationQuality;
   // Epoch ms when this fix was produced by the OS (or when refreshLocation
   // synthesised it). Preserved end-to-end so the server can rebuild the
   // intra-batch trajectory instead of stamping everything with `now`.
@@ -82,6 +87,8 @@ export interface DeviceMovedEvent {
   deviceId: string;
   lat: number;
   lon: number;
+  accuracy: number | null;
+  quality: LocationQuality | null;
   cid: number | null;
   lac: number | null;
   signalDbm: number | null;

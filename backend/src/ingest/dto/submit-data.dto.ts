@@ -4,12 +4,16 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
+
+export const LOCATION_QUALITIES = ['gps', 'approx', 'network'] as const;
+export type LocationQuality = (typeof LOCATION_QUALITIES)[number];
 
 export class LocationDto {
   @ApiProperty({ example: 21.028511 })
@@ -19,6 +23,27 @@ export class LocationDto {
   @ApiProperty({ example: 105.804817 })
   @IsNumber()
   longitude: number;
+
+  /**
+   * Horizontal accuracy radius (68% confidence) reported by the OS, in
+   * metres. Carries the raw value so the server can audit the client's
+   * quality classification and reproduce it on different tier boundaries.
+   */
+  @ApiPropertyOptional({ example: 12.5 })
+  @IsOptional()
+  @IsNumber()
+  accuracy?: number;
+
+  /**
+   * Quality tier assigned on the device based on `accuracy`. Drives the
+   * "consumer decides" policy on the server side: only `gps` feeds the
+   * polyline and geofence checks; `approx`/`network` keep `last_seen`
+   * alive and let the dashboard render a dimmed marker.
+   */
+  @ApiPropertyOptional({ enum: LOCATION_QUALITIES })
+  @IsOptional()
+  @IsIn(LOCATION_QUALITIES as readonly string[])
+  quality?: LocationQuality;
 
   /**
    * Epoch ms when the fix was produced on the device. Carried through

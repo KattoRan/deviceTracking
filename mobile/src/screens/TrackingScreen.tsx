@@ -91,6 +91,9 @@ export default function TrackingScreen() {
     const last = bufferRef.current[bufferRef.current.length - 1];
     if (!last || last.timestamp !== location.timestamp) {
       bufferRef.current.push(location);
+      console.log(
+        `[GPS] fix pushed → buffer=${bufferRef.current.length} acc=${location.accuracy?.toFixed(1) ?? '?'}m`,
+      );
     }
     lastKnownRef.current = location;
   }, [location]);
@@ -138,6 +141,9 @@ export default function TrackingScreen() {
         return null;
       }
 
+      console.log(
+        `[GPS] flush → ${locations.length} fix(es) (fallback=${batch.length === 0})`,
+      );
       const towers = await fetchCellTowers();
       const payload: IngestPayload = { locations, cellTowers: towers };
 

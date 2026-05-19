@@ -9,13 +9,31 @@ import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SubmitDataDto } from './dto/submit-data.dto';
+import { LocationDto, SubmitDataDto } from './dto/submit-data.dto';
 import {
   ConcurrencyQueue,
   isValidCell,
   markServingCell,
   type NormalizedCell,
 } from './ingest.utils';
+
+// Same tier boundaries the mobile client uses (locationService.ts). We
+// re-derive on the server too because (a) older clients ship `accuracy`
+// without `quality`, and (b) it lets us audit/override the client's call
+// from one place when boundaries change.
+const ACCURACY_GPS_GRADE_M = 20;
+const ACCURACY_APPROX_M = 80;
+type LocationQuality = 'gps' | 'approx' | 'network';
+
+function deriveQuality(
+  loc: LocationDto,
+): LocationQuality | null {
+  if (loc.quality) return loc.quality;
+  if (loc.accuracy == null) return null;
+  if (loc.accuracy <= ACCURACY_GPS_GRADE_M) return 'gps';
+  if (loc.accuracy <= ACCURACY_APPROX_M) return 'approx';
+  return 'network';
+}
 
 function haversineMeters(
   lat1: number,
@@ -71,6 +89,7 @@ export class IngestService {
     // every fix in the batch — including this one — gets persisted.
     const latest = dto.locations[dto.locations.length - 1];
     const latestAt = new Date(latest.timestamp);
+    const latestQuality = deriveQuality(latest);
 
     const validCells = (dto.cellTowers ?? []).filter(isValidCell);
     const cells = validCells.length > 0 ? markServingCell(validCells) : [];
@@ -110,6 +129,8 @@ export class IngestService {
       deviceId,
       lat: latest.latitude,
       lon: latest.longitude,
+      accuracy: latest.accuracy ?? null,
+      quality: latestQuality,
       cid: servingCell?.cid ?? null,
       lac: servingCell?.lac ?? null,
       signalDbm: servingCell?.signalDbm ?? null,
@@ -131,7 +152,13 @@ export class IngestService {
     void this.persistInBackground(deviceId, dto.locations, cells, latestAt);
     if (servingCell) void this.lookupBtsInBackground(servingCell);
 
-    if (device.geofence) {
+    // Consumer policy: only fixes the OS confirmed as real GNSS feed the
+    // geofence evaluator. WiFi/cell-based fixes drift hundreds of metres
+    // around a stationary device — running the breach check on them
+    // produces phantom "ra khỏi vùng" alerts. The dashboard still sees the
+    // device move via the realtime broadcast above; we just don't trigger
+    // alarms off untrustworthy positions.
+    if (device.geofence && latestQuality === 'gps') {
       void this.evaluateGeofence(
         deviceId,
         device.user?.full_name ?? device.phone_number,
@@ -217,7 +244,7 @@ export class IngestService {
 
   private async persistInBackground(
     deviceId: string,
-    locations: { latitude: number; longitude: number; timestamp: number }[],
+    locations: LocationDto[],
     cells: NormalizedCell[],
     latestAt: Date,
   ): Promise<void> {
@@ -237,6 +264,8 @@ export class IngestService {
             device_id: deviceId,
             latitude: loc.latitude,
             longitude: loc.longitude,
+            accuracy_m: loc.accuracy ?? null,
+            quality: deriveQuality(loc),
             recorded_at: new Date(loc.timestamp),
           })),
         });

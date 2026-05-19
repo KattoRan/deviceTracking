@@ -1,8 +1,10 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { EventsGateway, type GeofenceBreachEvent } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
+import type { HistoryQualityMode } from './dto/history-query.dto';
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -144,6 +146,7 @@ export class DevicesService {
     from?: string,
     to?: string,
     minDistanceMeters?: number,
+    qualityMode: HistoryQualityMode = 'gps',
   ) {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
@@ -157,22 +160,37 @@ export class DevicesService {
       : new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const toDate = to ? new Date(to) : now;
 
+    // Each tier mode keeps NULL too — rows ingested before the quality
+    // column existed shouldn't suddenly disappear after the migration.
+    const allowedQualities: string[] =
+      qualityMode === 'all'
+        ? ['gps', 'approx', 'network']
+        : qualityMode === 'gps_approx'
+          ? ['gps', 'approx']
+          : ['gps'];
+    const qualityFilter = Prisma.sql`(quality IS NULL OR quality = ANY(${allowedQualities}))`;
+
     const rows = await this.prisma.$queryRaw<
       Array<{
         latitude: string;
         longitude: string;
+        accuracy_m: number | null;
+        quality: string | null;
         district: string | null;
         recorded_at: Date;
       }>
     >`
       SELECT latitude::text AS latitude,
              longitude::text AS longitude,
+             accuracy_m,
+             quality,
              district,
              recorded_at
       FROM location_history
       WHERE device_id = ${deviceId}
         AND recorded_at >= ${fromDate}
         AND recorded_at <= ${toDate}
+        AND ${qualityFilter}
       ORDER BY recorded_at ASC;
     `;
 
@@ -180,6 +198,8 @@ export class DevicesService {
     const points: Array<{
       lat: number;
       lon: number;
+      accuracy: number | null;
+      quality: string | null;
       district: string | null;
       time: Date;
     }> = [];
@@ -195,7 +215,14 @@ export class DevicesService {
         if (minDist > 0 && stepDist < minDist) continue;
         distanceTotal += stepDist;
       }
-      points.push({ lat, lon, district: row.district, time: row.recorded_at });
+      points.push({
+        lat,
+        lon,
+        accuracy: row.accuracy_m,
+        quality: row.quality,
+        district: row.district,
+        time: row.recorded_at,
+      });
       prevLat = lat;
       prevLon = lon;
     }

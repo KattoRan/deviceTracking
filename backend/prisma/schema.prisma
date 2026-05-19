@@ -91,6 +91,18 @@ model location_history {
   latitude  Decimal @db.Decimal(10, 8)
   longitude Decimal @db.Decimal(11, 8)
 
+  // Horizontal accuracy radius (68% confidence) reported by the OS, in metres.
+  // Nullable so historic rows written before this column existed still load.
+  accuracy_m Float?
+
+  // Quality tier derived from accuracy_m on ingest. Consumers (polyline,
+  // geofence) filter by this; persisted rather than re-derived so tier
+  // boundaries can change without rewriting history.
+  //   'gps'     ≤ 20m   feed polyline + geofence
+  //   'approx'  ≤ 80m   keep for context, skip polyline by default
+  //   'network' ≤ 200m  heartbeat only
+  quality String? @db.VarChar(16)
+
   geom Unsupported("geometry(Point,4326)")?
 
   district    String?
@@ -99,6 +111,7 @@ model location_history {
   device devices @relation(fields: [device_id], references: [id], onDelete: Cascade)
 
   @@index([device_id, recorded_at])
+  @@index([device_id, quality, recorded_at])
 }
 
 model cell_tower_history {

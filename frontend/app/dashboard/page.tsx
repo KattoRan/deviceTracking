@@ -59,6 +59,8 @@ export default function DashboardPage() {
               ...d,
               latitude: event.lat,
               longitude: event.lon,
+              accuracy: event.accuracy,
+              quality: event.quality,
               last_seen: event.timestamp,
               status: "online",
             }

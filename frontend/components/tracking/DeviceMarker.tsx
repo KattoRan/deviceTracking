@@ -1,7 +1,7 @@
 "use client";
 
 import L from "leaflet";
-import { Marker, Polyline, Popup } from "react-leaflet";
+import { Circle, Marker, Polyline, Popup } from "react-leaflet";
 import type { Device } from "@/types/device";
 
 export interface BtsMapStation {
@@ -74,8 +74,43 @@ export default function DeviceMarker({
   const btsLat = realtimeBts?.lat ?? fallbackBts?.latitude;
   const btsLon = realtimeBts?.lon ?? fallbackBts?.longitude;
 
+  // Only render the confidence ring for non-GPS realtime fixes — the common
+  // outdoor case stays uncluttered. The ring radius mirrors the OS-reported
+  // accuracy so operators can see the actual uncertainty rather than guessing.
+  const isApprox =
+    device.status === "online" &&
+    device.quality != null &&
+    device.quality !== "gps";
+  const accuracyRadius =
+    isApprox && device.accuracy != null && device.accuracy > 0
+      ? device.accuracy
+      : 0;
+  const ringColor = device.quality === "network" ? "#ef4444" : "#f59e0b";
+  const qualityLabel =
+    device.quality === "approx"
+      ? "GPS yếu (≤80m)"
+      : device.quality === "network"
+        ? "WiFi/Cell (≤200m)"
+        : device.quality === "gps"
+          ? "GPS chuẩn"
+          : null;
+
   return (
     <>
+      {accuracyRadius > 0 && (
+        <Circle
+          center={[device.latitude, device.longitude]}
+          radius={accuracyRadius}
+          pathOptions={{
+            color: ringColor,
+            fillColor: ringColor,
+            fillOpacity: 0.1,
+            weight: 1,
+            dashArray: "4 4",
+          }}
+        />
+      )}
+
       {showBtsLine && btsLat != null && btsLon != null && (
         <Polyline
           positions={[
@@ -95,6 +130,7 @@ export default function DeviceMarker({
         position={[device.latitude, device.longitude]}
         icon={deviceIcon(device.status, selected)}
         zIndexOffset={selected ? 1000 : 0}
+        opacity={isApprox ? 0.7 : 1}
         eventHandlers={{
           click: (e) => {
             L.DomEvent.stopPropagation(e);
@@ -113,6 +149,20 @@ export default function DeviceMarker({
                 {device.status === "online" ? "online" : "offline"}
               </span>
             </div>
+            {qualityLabel && (
+              <div
+                style={{
+                  fontSize: 11,
+                  marginBottom: 4,
+                  color: isApprox ? "#b45309" : "#475569",
+                }}
+              >
+                {qualityLabel}
+                {device.accuracy != null
+                  ? ` · ±${Math.round(device.accuracy)}m`
+                  : ""}
+              </div>
+            )}
             {device.district && (
               <div style={{ fontSize: 11, color: "#64748b" }}>{device.district}</div>
             )}

@@ -5,6 +5,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect, useMemo, useRef } from "react";
 import {
+  Circle,
   CircleMarker,
   MapContainer,
   Marker,
@@ -14,12 +15,34 @@ import {
   ZoomControl,
   useMap,
 } from "react-leaflet";
-import type { HistoryPoint } from "@/types/device";
+import type { HistoryPoint, LocationQuality } from "@/types/device";
 
 // Above this point count, drawing one CircleMarker per waypoint becomes the
 // dominant cost (each one is a DOM/canvas object with its own popup). The
 // polyline already shows the path, so we sample a fixed number of waypoints.
 const WAYPOINT_BUDGET = 200;
+
+// Visual encoding of the quality tier on the waypoint dot. NULL is treated
+// like 'gps' so rows persisted before the migration still render as the
+// "trusted" colour — otherwise old history would suddenly look low-quality.
+const QUALITY_COLORS: Record<
+  "gps" | "approx" | "network",
+  { passed: string; pending: string; fillPending: string }
+> = {
+  gps:     { passed: "#16a34a", pending: "#94a3b8", fillPending: "#cbd5e1" },
+  approx:  { passed: "#f59e0b", pending: "#fbbf24", fillPending: "#fde68a" },
+  network: { passed: "#ef4444", pending: "#f87171", fillPending: "#fecaca" },
+};
+
+function colorsFor(quality: LocationQuality | null) {
+  return QUALITY_COLORS[quality ?? "gps"];
+}
+
+function qualityLabel(quality: LocationQuality | null): string {
+  if (quality === "approx") return "Gần đúng";
+  if (quality === "network") return "WiFi/Cell";
+  return "GPS";
+}
 
 const currentIcon = L.divIcon({
   className: "",
@@ -195,6 +218,26 @@ export default function HistoryMap({
         </CircleMarker>
       )}
 
+      {/* Accuracy ring — only drawn when the fix isn't GPS-grade, so the
+          common case stays clean. Conveys "vị trí gần đúng, sai số ~X mét"
+          visually instead of with text. */}
+      {currentPoint &&
+        currentPoint.quality &&
+        currentPoint.quality !== "gps" &&
+        currentPoint.accuracy != null && (
+          <Circle
+            center={[currentPoint.lat, currentPoint.lon]}
+            radius={currentPoint.accuracy}
+            pathOptions={{
+              color: colorsFor(currentPoint.quality).passed,
+              fillColor: colorsFor(currentPoint.quality).fillPending,
+              fillOpacity: 0.18,
+              weight: 1,
+              dashArray: "4 4",
+            }}
+          />
+        )}
+
       {currentPoint && (
         <Marker
           position={[currentPoint.lat, currentPoint.lon]}
@@ -208,6 +251,13 @@ export default function HistoryMap({
               <br />
               {currentPoint.district ||
                 `${currentPoint.lat.toFixed(5)}, ${currentPoint.lon.toFixed(5)}`}
+              <br />
+              <span className="text-slate-500">
+                {qualityLabel(currentPoint.quality)}
+                {currentPoint.accuracy != null
+                  ? ` · ±${Math.round(currentPoint.accuracy)}m`
+                  : ""}
+              </span>
             </div>
           </Popup>
         </Marker>
@@ -215,14 +265,15 @@ export default function HistoryMap({
 
       {sampledWaypoints.map(({ point: p, idx }) => {
         const isPassed = idx <= currentIndex;
+        const palette = colorsFor(p.quality);
         return (
           <CircleMarker
             key={`${p.time}-${idx}`}
             center={[p.lat, p.lon]}
             radius={3}
             pathOptions={{
-              color: isPassed ? "#16a34a" : "#94a3b8",
-              fillColor: isPassed ? "#16a34a" : "#cbd5e1",
+              color: isPassed ? palette.passed : palette.pending,
+              fillColor: isPassed ? palette.passed : palette.fillPending,
               fillOpacity: isPassed ? 0.9 : 0.6,
             }}
           >
@@ -231,6 +282,11 @@ export default function HistoryMap({
                 #{idx + 1} — {new Date(p.time).toLocaleTimeString("vi-VN")}
                 <br />
                 {p.district || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`}
+                <br />
+                <span className="text-slate-500">
+                  {qualityLabel(p.quality)}
+                  {p.accuracy != null ? ` · ±${Math.round(p.accuracy)}m` : ""}
+                </span>
               </div>
             </Popup>
           </CircleMarker>

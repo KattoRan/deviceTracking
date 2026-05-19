@@ -1,6 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsISO8601, IsOptional, Min } from 'class-validator';
+import { IsIn, IsInt, IsISO8601, IsOptional, Min } from 'class-validator';
+
+export const HISTORY_QUALITY_MODES = ['gps', 'gps_approx', 'all'] as const;
+export type HistoryQualityMode = (typeof HISTORY_QUALITY_MODES)[number];
 
 export class HistoryQueryDto {
   @ApiPropertyOptional({
@@ -30,4 +33,20 @@ export class HistoryQueryDto {
   @IsInt()
   @Min(0)
   minDistanceMeters?: number;
+
+  /**
+   * "Consumer decides" — caller picks the quality tier its UI needs:
+   *   gps        → only GNSS-grade fixes (≤20m). Mặc định. Polyline sạch.
+   *   gps_approx → kèm thêm fix degraded GPS (≤80m). Trail dày hơn nhưng
+   *                vẫn loại fix WiFi/cell.
+   *   all        → mọi fix đã được ingest (kể cả network ≤200m). Dùng cho
+   *                debug hoặc xem coverage indoor.
+   *
+   * Rows persisted before this column existed (`quality` IS NULL) đều được
+   * giữ ở mọi mode — tránh đoạn lịch sử cũ biến mất sau migration.
+   */
+  @ApiPropertyOptional({ enum: HISTORY_QUALITY_MODES, default: 'gps' })
+  @IsOptional()
+  @IsIn(HISTORY_QUALITY_MODES as readonly string[])
+  quality?: HistoryQualityMode;
 }

@@ -1,10 +1,21 @@
 import * as Location from 'expo-location';
-import type { LocationData } from '../models/types';
+import type { LocationData, LocationQuality } from '../models/types';
 
-// Fixes with horizontal accuracy radius worse than this (in metres) are
-// treated as too noisy to act on — typically indoor GPS or initial cold-start
-// readings where the receiver hasn't converged yet.
-const MAX_ACCEPTABLE_ACCURACY_M = 100;
+// Tiered acceptance instead of one hard cutoff:
+//   ≤ 20m  → 'gps'     real GNSS fix, fed into polyline + geofence
+//   ≤ 80m  → 'approx'  degraded GPS / fused, kept for last_seen + map dot
+//   ≤ 200m → 'network' WiFi/cell positioning, heartbeat only
+//   > 200m → dropped entirely (no longer trustworthy as "near user")
+const ACCURACY_GPS_GRADE_M = 20;
+const ACCURACY_APPROX_M = 80;
+const MAX_ACCEPTABLE_ACCURACY_M = 200;
+
+function classifyQuality(accuracy: number | null | undefined): LocationQuality {
+  if (accuracy == null) return 'network';
+  if (accuracy <= ACCURACY_GPS_GRADE_M) return 'gps';
+  if (accuracy <= ACCURACY_APPROX_M) return 'approx';
+  return 'network';
+}
 
 export class LocationPermissionError extends Error {
   constructor() {
@@ -38,6 +49,7 @@ export async function getCurrentLocation(): Promise<LocationData> {
     latitude: coords.latitude,
     longitude: coords.longitude,
     accuracy: coords.accuracy ?? undefined,
+    quality: classifyQuality(coords.accuracy),
     timestamp: timestamp ?? Date.now(),
   };
 }
@@ -57,11 +69,15 @@ export async function watchLocation(
     const subscription = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.High,
-        distanceInterval: 10, // metres
-        timeInterval: 10_000, // Android only
+        // Tighter than before (was 10m / 10s) so the polyline captures
+        // turns and short walks. Combined with the tiered quality filter
+        // this gives a smoother trail without re-introducing noise: only
+        // gps-grade fixes are actually drawn server-side.
+        distanceInterval: 5, // metres
+        timeInterval: 5_000, // ms — Android only
       },
       ({ coords, timestamp }) => {
-        // Drop fixes with poor accuracy — they cause phantom "jumps" on the map.
+        // Hard cutoff: fixes worse than 200m are useless even as heartbeat.
         if (
           coords.accuracy != null &&
           coords.accuracy > MAX_ACCEPTABLE_ACCURACY_M
@@ -72,6 +88,7 @@ export async function watchLocation(
           latitude: coords.latitude,
           longitude: coords.longitude,
           accuracy: coords.accuracy ?? undefined,
+          quality: classifyQuality(coords.accuracy),
           timestamp: timestamp ?? Date.now(),
         });
       },

@@ -60,6 +60,7 @@ export class DevicesController {
       query.from,
       query.to,
       query.minDistanceMeters,
+      query.quality,
     );
   }
 

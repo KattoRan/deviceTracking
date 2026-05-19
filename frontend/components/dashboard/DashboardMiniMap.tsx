@@ -2,9 +2,10 @@
 
 import "leaflet/dist/leaflet.css";
 
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Circle,
   CircleMarker,
   MapContainer,
   TileLayer,
@@ -73,30 +74,61 @@ export default function DashboardMiniMap({ devices }: { devices: Device[] }) {
 
       {mappable.map((d) => {
         const online = d.status === "online";
+        // Non-GPS realtime fixes are degraded — fade the dot and draw the
+        // OS-reported accuracy ring so operators can see "this position is
+        // approximate" at a glance instead of mistaking drift for movement.
+        const isApprox = online && d.quality != null && d.quality !== "gps";
+        const ringRadiusM =
+          isApprox && d.accuracy != null && d.accuracy > 0 ? d.accuracy : 0;
+        const ringColor =
+          d.quality === "network" ? "#ef4444" : "#f59e0b";
+
         return (
-          <CircleMarker
-            key={d.id}
-            center={[d.latitude, d.longitude]}
-            radius={7}
-            pathOptions={{
-              color: online ? "#059669" : "#94a3b8",
-              fillColor: online ? "#10b981" : "#cbd5e1",
-              fillOpacity: 0.85,
-              weight: 2,
-            }}
-            eventHandlers={{
-              click: () => router.push(`/tracking?focus=${d.id}`),
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -4]}>
-              <div className="text-xs">
-                <div className="font-semibold">{d.name}</div>
-                <div className="text-slate-500">
-                  {online ? "Trực tuyến" : "Ngoại tuyến"}
+          <Fragment key={d.id}>
+            {ringRadiusM > 0 && (
+              <Circle
+                center={[d.latitude, d.longitude]}
+                radius={ringRadiusM}
+                pathOptions={{
+                  color: ringColor,
+                  fillColor: ringColor,
+                  fillOpacity: 0.1,
+                  weight: 1,
+                  dashArray: "4 4",
+                }}
+              />
+            )}
+            <CircleMarker
+              center={[d.latitude, d.longitude]}
+              radius={7}
+              pathOptions={{
+                color: online ? "#059669" : "#94a3b8",
+                fillColor: online ? "#10b981" : "#cbd5e1",
+                fillOpacity: isApprox ? 0.45 : 0.85,
+                weight: 2,
+              }}
+              eventHandlers={{
+                click: () => router.push(`/tracking?focus=${d.id}`),
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -4]}>
+                <div className="text-xs">
+                  <div className="font-semibold">{d.name}</div>
+                  <div className="text-slate-500">
+                    {online ? "Trực tuyến" : "Ngoại tuyến"}
+                  </div>
+                  {isApprox && (
+                    <div className="mt-0.5 text-amber-600">
+                      Vị trí gần đúng
+                      {d.accuracy != null
+                        ? ` · ±${Math.round(d.accuracy)}m`
+                        : ""}
+                    </div>
+                  )}
                 </div>
-              </div>
-            </Tooltip>
-          </CircleMarker>
+              </Tooltip>
+            </CircleMarker>
+          </Fragment>
         );
       })}
     </MapContainer>

@@ -16,6 +16,12 @@ export interface DeviceMovedEvent {
   deviceId: string;
   lat: number;
   lon: number;
+  // Horizontal accuracy in metres (null when the device did not report it).
+  // Lets the dashboard render a confidence circle or dim the marker.
+  accuracy: number | null;
+  // Tier the device assigned to this fix; the dashboard uses it to decide
+  // marker opacity / icon and whether to display a "vị trí gần đúng" notice.
+  quality: 'gps' | 'approx' | 'network' | null;
   cid: number | null;
   lac: number | null;
   signalDbm: number | null;

@@ -20,7 +20,11 @@ import {
   useState,
 } from "react";
 import deviceService from "@/services/deviceService";
-import type { Device, LocationHistory } from "@/types/device";
+import type {
+  Device,
+  HistoryQualityMode,
+  LocationHistory,
+} from "@/types/device";
 
 const HistoryMap = dynamic(() => import("@/components/history/HistoryMap"), {
   ssr: false,
@@ -86,6 +90,7 @@ function HistoryPageInner() {
   const [history, setHistory] = useState<LocationHistory | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [qualityMode, setQualityMode] = useState<HistoryQualityMode>("gps");
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -160,6 +165,7 @@ function HistoryPageInner() {
         selectedDeviceId,
         new Date(fromDate).toISOString(),
         new Date(toDate).toISOString(),
+        qualityMode,
       );
       setHistory(data);
       if (data.points.length === 0) {
@@ -180,7 +186,7 @@ function HistoryPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDeviceId, fromDate, toDate]);
+  }, [selectedDeviceId, fromDate, toDate, qualityMode]);
 
   // Auto-fetch when arriving via deep-link (?deviceId=...) so the user lands on a populated map.
   const autoFetched = useRef(false);
@@ -385,6 +391,46 @@ function HistoryPageInner() {
             >
               Hôm nay
             </button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="py-1 text-xs text-slate-500">Chất lượng:</span>
+            {(
+              [
+                {
+                  mode: "gps" as const,
+                  label: "GPS chuẩn",
+                  hint: "≤20m — polyline sạch nhất",
+                },
+                {
+                  mode: "gps_approx" as const,
+                  label: "+ Gần đúng",
+                  hint: "Thêm fix ≤80m (GPS yếu, fused)",
+                },
+                {
+                  mode: "all" as const,
+                  label: "Tất cả",
+                  hint: "Kèm fix WiFi/cell ≤200m (indoor)",
+                },
+              ]
+            ).map(({ mode, label, hint }) => {
+              const active = qualityMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setQualityMode(mode)}
+                  title={hint}
+                  className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                    active
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
 

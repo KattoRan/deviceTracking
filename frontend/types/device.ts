@@ -35,6 +35,10 @@ export interface Device {
   /** Populated in-memory from `device_moved` — not returned by list API. */
   cellTowers?: CellTowerInfo[];
   connectedBts?: ConnectedBts | null;
+  /** Latest fix accuracy in metres, populated in-memory from `device_moved`. */
+  accuracy?: number | null;
+  /** Latest fix quality tier, populated in-memory from `device_moved`. */
+  quality?: LocationQuality | null;
 }
 
 /** GET /api/v1/devices/:id */
@@ -80,10 +84,23 @@ export interface DeviceDetail {
   } | null;
 }
 
+export type LocationQuality = "gps" | "approx" | "network";
+
+/**
+ * Caller-selectable quality filter for `GET /devices/:id/history`. Server
+ * default is `gps` — the cleanest polyline. `gps_approx` adds degraded GPS
+ * fixes (≤80m); `all` includes WiFi/cell-based fixes (≤200m) too.
+ */
+export type HistoryQualityMode = "gps" | "gps_approx" | "all";
+
 /** GET /api/v1/devices/:id/history */
 export interface HistoryPoint {
   lat: number;
   lon: number;
+  /** Horizontal accuracy radius in metres reported by the OS. */
+  accuracy: number | null;
+  /** Tier assigned on ingest. NULL = rows persisted before the column existed. */
+  quality: LocationQuality | null;
   district: string | null;
   time: string;
 }
@@ -108,6 +125,10 @@ export interface DeviceMovedEvent {
   deviceId: string;
   lat: number;
   lon: number;
+  /** Horizontal accuracy in metres, null if device didn't report it. */
+  accuracy: number | null;
+  /** Tier the device assigned to this fix. Drives marker opacity / confidence ring. */
+  quality: LocationQuality | null;
   cid: number | null;
   lac: number | null;
   signalDbm: number | null;

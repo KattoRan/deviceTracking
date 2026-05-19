@@ -1,5 +1,10 @@
 import { apiClient } from "@/lib/api";
-import type { Device, DeviceDetail, LocationHistory } from "@/types/device";
+import type {
+  Device,
+  DeviceDetail,
+  HistoryQualityMode,
+  LocationHistory,
+} from "@/types/device";
 
 export interface RegisterDeviceDto {
   fullName: string;
@@ -34,10 +39,11 @@ export const deviceService = {
     id: string,
     from: string,
     to: string,
+    quality?: HistoryQualityMode,
   ): Promise<LocationHistory> => {
     const { data } = await apiClient.get<LocationHistory>(
       `api/v1/devices/${id}/history`,
-      { params: { from, to } },
+      { params: { from, to, ...(quality ? { quality } : {}) } },
     );
     return data;
   },
