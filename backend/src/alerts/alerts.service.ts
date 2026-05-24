@@ -26,11 +26,12 @@ export class AlertsService {
   ) {}
 
   /**
-   * Mỗi 2 phút quét devices có last_seen quá ngưỡng mà chưa được alert.
+   * Mỗi vài phút quét devices có last_seen quá ngưỡng mà chưa được alert.
    * Set flag để không spam push trong những lần quét tiếp theo; flag sẽ
    * tự reset khi device gửi heartbeat (ingest.service.persistInBackground).
+   * Chu kỳ 5 phút đủ phản ứng cho ngưỡng 15 phút.
    */
-  @Cron(CronExpression.EVERY_2_MINUTES)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async detectOfflineDevices(): Promise<void> {
     const cutoff = new Date(Date.now() - OFFLINE_THRESHOLD_MS);
     const stale = await this.prisma.devices.findMany({
