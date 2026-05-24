@@ -6,23 +6,8 @@ import type {
   LocationHistory,
 } from "@/types/device";
 
-export interface RegisterDeviceDto {
-  fullName: string;
-  email: string;
-  address?: string;
-  citizenId: string;
-  phoneNumber: string;
-  device: {
-    model?: string;
-    type?: string;
-    os?: string;
-  };
-}
-
-export interface RegisterDeviceResult {
-  userId: string;
-  deviceId: string;
-}
+// Pairing flow đã chuyển sang mobile (POST /devices/pair). Web parent dashboard
+// chỉ tạo pairing code khi register tài khoản, không trực tiếp gọi pair.
 
 export const deviceService = {
   getAll: async (): Promise<Device[]> => {
@@ -48,16 +33,19 @@ export const deviceService = {
     return data;
   },
 
-  register: async (dto: RegisterDeviceDto): Promise<RegisterDeviceResult> => {
-    const { data } = await apiClient.post<RegisterDeviceResult>(
-      "api/v1/devices/register",
-      dto,
-    );
-    return data;
-  },
-
   remove: async (id: string): Promise<void> => {
     await apiClient.delete(`api/v1/devices/${id}`);
+  },
+
+  setLockStatus: async (
+    id: string,
+    locked: boolean,
+  ): Promise<{ locked: boolean }> => {
+    const { data } = await apiClient.patch<{ locked: boolean }>(
+      `api/v1/devices/${id}/lock`,
+      { locked },
+    );
+    return data;
   },
 };
 

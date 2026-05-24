@@ -8,49 +8,78 @@ datasource db {
   extensions = [postgis]
 }
 
-model users {
-  id         String   @id @default(uuid())
-  full_name  String
-  address    String?
-  email      String   @unique
-  citizen_id String   @unique
-  created_at DateTime @default(now())
+enum PersonType {
+  CHILD
+  ELDERLY
+}
 
-  devices devices[]
+model parent_accounts {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password_hash String
+  display_name  String?
+  pairing_code  String   @unique
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  devices            devices[]
+  push_subscriptions push_subscriptions[]
+  sos_events         sos_events[]
 }
 
 model devices {
-  id            String    @id @default(uuid())
-  user_id       String
-  phone_number  String    @unique
-  model         String?
-  type          String?
-  device_os     String?
-  last_seen     DateTime?
-  registered_at DateTime  @default(now())
-  geofence_id   String?
+  id                String     @id @default(uuid())
+  parent_account_id String
+  person_name       String
+  person_type       PersonType
+  phone_number      String?
+  model             String?
+  type              String?
+  device_os         String?
+  is_locked         Boolean    @default(false)
+  last_seen         DateTime?
+  last_battery      Int?
+  is_offline_alerted Boolean   @default(false)
+  is_low_battery_alerted Boolean @default(false)
+  registered_at     DateTime   @default(now())
 
-  user     users      @relation(fields: [user_id], references: [id])
-  geofence geofences? @relation(fields: [geofence_id], references: [id], onDelete: SetNull)
+  parent_account parent_accounts @relation(fields: [parent_account_id], references: [id], onDelete: Cascade)
 
   location_history   location_history[]
   cell_tower_history cell_tower_history[]
   commands           device_commands[]
+  device_geofences   device_geofences[]
+  sos_events         sos_events[]
 
-  @@index([user_id])
-  @@index([geofence_id])
+  @@index([parent_account_id])
 }
 
 model geofences {
-  id         String   @id @default(uuid())
-  name       String
-  lat        Decimal  @db.Decimal(10, 8)
-  lon        Decimal  @db.Decimal(11, 8)
-  radius_m   Int
-  created_at DateTime @default(now())
-  updated_at DateTime @default(now()) @updatedAt
+  id                String   @id @default(uuid())
+  parent_account_id String
+  name              String
+  lat               Decimal  @db.Decimal(10, 8)
+  lon               Decimal  @db.Decimal(11, 8)
+  radius_m          Int
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
 
-  devices devices[]
+  device_geofences device_geofences[]
+
+  @@index([parent_account_id])
+}
+
+model device_geofences {
+  device_id   String
+  geofence_id String
+  assigned_at DateTime @default(now())
+
+  device   devices   @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  geofence geofences @relation(fields: [geofence_id], references: [id], onDelete: Cascade)
+
+  @@id([device_id, geofence_id])
+  @@index([device_id])
+  @@index([geofence_id])
 }
 
 model device_commands {
@@ -76,14 +105,6 @@ model app_settings {
   updated_at DateTime @default(now()) @updatedAt
 }
 
-model admins {
-  id            String   @id @default(uuid())
-  username      String   @unique
-  password_hash String
-  created_at    DateTime @default(now())
-  updated_at    DateTime @default(now()) @updatedAt
-}
-
 model location_history {
   id        String  @id @default(uuid())
   device_id String
@@ -91,8 +112,6 @@ model location_history {
   latitude  Decimal @db.Decimal(10, 8)
   longitude Decimal @db.Decimal(11, 8)
 
-  // Horizontal accuracy radius (68% confidence) reported by the OS, in metres.
-  // Nullable so historic rows written before this column existed still load.
   accuracy_m Float?
 
   // Quality tier derived from accuracy_m on ingest. Consumers (polyline,
@@ -173,4 +192,37 @@ model bts_raw {
   reserved Int?
 
   @@ignore
+}
+
+model sos_events {
+  id                String   @id @default(uuid())
+  device_id         String
+  parent_account_id String
+  lat               Decimal  @db.Decimal(10, 8)
+  lon               Decimal  @db.Decimal(11, 8)
+  accuracy_m        Float?
+  battery_level     Int?
+  triggered_at      DateTime @default(now())
+  acknowledged_at   DateTime?
+
+  device         devices         @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  parent_account parent_accounts @relation(fields: [parent_account_id], references: [id], onDelete: Cascade)
+
+  @@index([parent_account_id, triggered_at])
+  @@index([device_id, triggered_at])
+}
+
+model push_subscriptions {
+  id                String   @id @default(uuid())
+  parent_account_id String
+  endpoint          String   @unique
+  p256dh            String
+  auth              String
+  user_agent        String?
+  created_at        DateTime @default(now())
+  last_used_at      DateTime @default(now())
+
+  parent_account parent_accounts @relation(fields: [parent_account_id], references: [id], onDelete: Cascade)
+
+  @@index([parent_account_id])
 }

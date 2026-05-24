@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import {
+  AlertTriangle,
   Calendar,
   Clock,
   Loader2,
@@ -25,6 +26,7 @@ interface DeviceDetailPanelProps {
   device: Device;
   onClose: () => void;
   isMobile?: boolean;
+  onLockChange?: (deviceId: string, locked: boolean) => void;
 }
 
 interface SignalLevel {
@@ -96,6 +98,7 @@ export default function DeviceDetailPanel({
   device,
   onClose,
   isMobile = false,
+  onLockChange,
 }: DeviceDetailPanelProps) {
   const [detail, setDetail] = useState<DeviceDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -183,7 +186,40 @@ export default function DeviceDetailPanel({
         </div>
       </div>
 
-      <RemoteControlPanel deviceId={device.id} />
+      {device.spoofingSuspected && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600" />
+            <div>
+              <p className="text-sm font-semibold text-red-800">
+                Nghi ngờ giả mạo GPS
+              </p>
+              <p className="mt-0.5 text-xs text-red-700">
+                Vị trí GPS cách trạm BTS đang kết nối{" "}
+                <span className="font-semibold">
+                  {device.gpsBtsDistanceM != null
+                    ? formatDistance(device.gpsBtsDistanceM)
+                    : "?"}
+                </span>
+                {device.connectedBts?.range != null && (
+                  <>, vượt quá phạm vi phủ sóng{" "}
+                    <span className="font-semibold">
+                      {formatDistance(device.connectedBts.range)}
+                    </span>
+                  </>
+                )}
+                . Thiết bị có thể đang sử dụng ứng dụng fake GPS.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <RemoteControlPanel
+        deviceId={device.id}
+        isLocked={device.is_locked}
+        onLockChange={(locked) => onLockChange?.(device.id, locked)}
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-16">

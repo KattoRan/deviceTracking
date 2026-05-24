@@ -18,11 +18,15 @@ export interface ConnectedBts {
   range: number | null;
 }
 
+export type PersonType = "CHILD" | "ELDERLY";
+
 /** Row in GET /api/v1/devices. */
 export interface Device {
   id: string;
   name: string;
-  phone_number: string;
+  person_name: string;
+  person_type: PersonType;
+  phone_number: string | null;
   model: string | null;
   device_os: string | null;
   type: string | null;
@@ -31,6 +35,7 @@ export interface Device {
   district: string | null;
   bts_id: number | null;
   last_seen: string | null;
+  last_battery: number | null;
   status: "online" | "offline";
   /** Populated in-memory from `device_moved` — not returned by list API. */
   cellTowers?: CellTowerInfo[];
@@ -39,24 +44,35 @@ export interface Device {
   accuracy?: number | null;
   /** Latest fix quality tier, populated in-memory from `device_moved`. */
   quality?: LocationQuality | null;
+  /** GPS position is suspiciously far from connected BTS. */
+  spoofingSuspected?: boolean;
+  /** Distance (m) between GPS fix and connected BTS. */
+  gpsBtsDistanceM?: number | null;
+  /** Device is locked by admin. */
+  is_locked?: boolean;
 }
 
 /** GET /api/v1/devices/:id */
 export interface DeviceDetail {
   id: string;
-  phone_number: string;
+  person_name: string;
+  person_type: PersonType;
+  phone_number: string | null;
   model: string | null;
   device_os: string | null;
   type: string | null;
   registered_at: string;
   status: "online" | "offline";
   last_seen: string | null;
-  owner: {
-    full_name: string;
-    email: string;
-    address: string | null;
-    citizen_id: string;
-  } | null;
+  last_battery: number | null;
+  is_locked: boolean;
+  geofences: Array<{
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    radius_m: number;
+  }>;
   location: {
     latitude: number;
     longitude: number;
@@ -109,7 +125,9 @@ export interface LocationHistory {
   device: {
     id: string;
     name: string;
-    phone_number: string;
+    person_name: string;
+    person_type: PersonType;
+    phone_number: string | null;
   };
   from: string;
   to: string;
@@ -135,4 +153,8 @@ export interface DeviceMovedEvent {
   timestamp: string;
   cellTowers: CellTowerInfo[];
   connectedBts: ConnectedBts | null;
+  /** GPS position is suspiciously far from connected BTS. */
+  spoofingSuspected: boolean;
+  /** Distance (m) between GPS fix and connected BTS. */
+  gpsBtsDistanceM: number | null;
 }

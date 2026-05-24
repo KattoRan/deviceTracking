@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Lock,
   MapPin,
   Search,
   Smartphone,
@@ -241,18 +243,38 @@ function DeviceItem({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between">
-            <p className="truncate text-sm font-medium text-slate-900">
-              {device.name || device.phone_number}
-            </p>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="truncate text-sm font-medium text-slate-900">
+                {device.name || device.phone_number}
+              </p>
+              {device.is_locked && (
+                <span title="Thiết bị đã bị khóa">
+                  <Lock className="h-3.5 w-3.5 flex-shrink-0 text-red-500" />
+                </span>
+              )}
+              {device.spoofingSuspected && (
+                <span title="Nghi ngờ fake GPS">
+                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-red-500" />
+                </span>
+              )}
+            </div>
             <span
               className={cn(
                 "ml-2 flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-                device.status === "online"
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-slate-100 text-slate-500",
+                device.is_locked
+                  ? "bg-red-50 text-red-700"
+                  : device.spoofingSuspected
+                    ? "bg-red-50 text-red-700"
+                    : device.status === "online"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-slate-100 text-slate-500",
               )}
             >
-              {STATUS_LABEL[device.status]}
+              {device.is_locked
+                ? "Bị khóa"
+                : device.spoofingSuspected
+                  ? "Fake GPS"
+                  : STATUS_LABEL[device.status]}
             </span>
           </div>
           <p className="mt-0.5 truncate text-xs text-slate-500">

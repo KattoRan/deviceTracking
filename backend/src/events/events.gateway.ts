@@ -44,6 +44,10 @@ export interface DeviceMovedEvent {
     radio: string | null;
     range: number | null;
   } | null;
+  /** True when GPS position is suspiciously far from the connected BTS. */
+  spoofingSuspected: boolean;
+  /** Distance (m) between GPS fix and connected BTS, null when BTS unknown. */
+  gpsBtsDistanceM: number | null;
 }
 
 export interface CommandDispatchEvent {
@@ -68,6 +72,11 @@ export interface DeviceDeletedEvent {
   deviceId: string;
 }
 
+export interface DeviceLockChangedEvent {
+  deviceId: string;
+  locked: boolean;
+}
+
 export interface GeofenceBreachEvent {
   deviceId: string;
   deviceName: string | null;
@@ -80,6 +89,37 @@ export interface GeofenceBreachEvent {
   centerLon: number;
   radiusM: number;
   distanceM: number;
+  timestamp: string;
+}
+
+export interface SosAlertEvent {
+  sosEventId: string;
+  deviceId: string;
+  deviceName: string | null;
+  lat: number;
+  lon: number;
+  accuracy: number | null;
+  batteryLevel: number | null;
+  triggeredAt: string;
+}
+
+export interface LowBatteryEvent {
+  deviceId: string;
+  deviceName: string | null;
+  batteryLevel: number;
+  timestamp: string;
+}
+
+export interface DeviceOfflineEvent {
+  deviceId: string;
+  deviceName: string | null;
+  lastSeen: string | null;
+  timestamp: string;
+}
+
+export interface BatteryUpdateEvent {
+  deviceId: string;
+  batteryLevel: number;
   timestamp: string;
 }
 
@@ -205,5 +245,25 @@ export class EventsGateway
    */
   emitDeviceDeleted(event: DeviceDeletedEvent) {
     this.server.emit('device_deleted', event);
+  }
+
+  emitDeviceLockChanged(event: DeviceLockChangedEvent) {
+    this.server.emit('device_lock_changed', event);
+  }
+
+  emitSosAlert(event: SosAlertEvent) {
+    this.server.emit('sos_alert', event);
+  }
+
+  emitLowBattery(event: LowBatteryEvent) {
+    this.server.emit('low_battery', event);
+  }
+
+  emitDeviceOffline(event: DeviceOfflineEvent) {
+    this.server.emit('device_offline', event);
+  }
+
+  emitBatteryUpdate(event: BatteryUpdateEvent) {
+    this.server.emit('battery_update', event);
   }
 }

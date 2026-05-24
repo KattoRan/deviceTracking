@@ -217,7 +217,7 @@ function HistoryPageInner() {
     return devices.filter(
       (d) =>
         (d.name?.toLowerCase() || "").includes(q) ||
-        d.phone_number.includes(q) ||
+        (d.phone_number?.includes(q) ?? false) ||
         (d.model?.toLowerCase() || "").includes(q),
     );
   }, [devices, deviceSearch]);

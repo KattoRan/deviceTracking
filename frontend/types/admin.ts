@@ -1,14 +1,22 @@
-export interface Admin {
+export interface ParentAccount {
   id: string;
-  username: string;
+  email: string;
+  displayName: string | null;
+  pairingCode: string;
+}
+
+export interface RegisterInput {
+  email: string;
+  password: string;
+  displayName?: string;
 }
 
 export interface LoginInput {
-  username: string;
+  email: string;
   password: string;
 }
 
 export interface LoginResponse {
   token: string;
-  admin: Admin;
+  parentAccount: ParentAccount;
 }

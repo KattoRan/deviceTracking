@@ -9,13 +9,10 @@ const STATE_PREFIX = 'gf:state';
 const BREACH_PREFIX = 'gf:breach';
 
 /**
- * Per-device geofence presence cache. Two parallel Redis namespaces:
- *   - gf:state:<deviceId>  = 'inside' | 'outside' — drives transition detection.
- *   - gf:breach:<deviceId> = JSON of the latest outside-event — drives the
- *     "still outside" persistent banner. Set when transitioning out, cleared
- *     when transitioning back in (or when the device is detached / the zone
- *     is deleted), so the dashboard can list every device currently in
- *     violation at any moment, even on first page load.
+ * Per-(device, geofence) presence cache. Keys are scoped by both ids because
+ * a single device can belong to multiple zones (n:n) — being outside zone A
+ * doesn't tell us anything about zone B. The dashboard's "active breaches"
+ * list is the union across all (deviceId, geofenceId) pairs.
  */
 @Injectable()
 export class GeofenceStateService {
@@ -23,71 +20,89 @@ export class GeofenceStateService {
 
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
 
-  private stateKey(deviceId: string): string {
-    return `${STATE_PREFIX}:${deviceId}`;
+  private stateKey(deviceId: string, geofenceId: string): string {
+    return `${STATE_PREFIX}:${deviceId}:${geofenceId}`;
   }
 
-  private breachKey(deviceId: string): string {
-    return `${BREACH_PREFIX}:${deviceId}`;
+  private breachKey(deviceId: string, geofenceId: string): string {
+    return `${BREACH_PREFIX}:${deviceId}:${geofenceId}`;
   }
 
-  async get(deviceId: string): Promise<GeofenceStatus | null> {
-    const raw = await this.redis.get(this.stateKey(deviceId));
+  async get(
+    deviceId: string,
+    geofenceId: string,
+  ): Promise<GeofenceStatus | null> {
+    const raw = await this.redis.get(this.stateKey(deviceId, geofenceId));
     if (raw === 'inside' || raw === 'outside') return raw;
     return null;
   }
 
-  async set(deviceId: string, status: GeofenceStatus): Promise<void> {
-    await this.redis.set(this.stateKey(deviceId), status);
+  async set(
+    deviceId: string,
+    geofenceId: string,
+    status: GeofenceStatus,
+  ): Promise<void> {
+    await this.redis.set(this.stateKey(deviceId, geofenceId), status);
   }
 
-  async clear(deviceId: string): Promise<void> {
-    await this.redis.del(this.stateKey(deviceId), this.breachKey(deviceId));
+  async clearPair(deviceId: string, geofenceId: string): Promise<void> {
+    await this.redis.del(
+      this.stateKey(deviceId, geofenceId),
+      this.breachKey(deviceId, geofenceId),
+    );
   }
 
-  async clearMany(deviceIds: readonly string[]): Promise<void> {
-    if (deviceIds.length === 0) return;
-    const keys: string[] = [];
-    for (const id of deviceIds) {
-      keys.push(this.stateKey(id), this.breachKey(id));
+  /** Wipe all state/breach entries for a device across every zone. */
+  async clearDevice(deviceId: string): Promise<void> {
+    const patterns = [
+      `${STATE_PREFIX}:${deviceId}:*`,
+      `${BREACH_PREFIX}:${deviceId}:*`,
+    ];
+    for (const pattern of patterns) {
+      await this.scanAndDelete(pattern);
     }
-    await this.redis.del(...keys);
+  }
+
+  /** Wipe all state/breach entries for a geofence across every device. */
+  async clearGeofence(geofenceId: string): Promise<void> {
+    await this.scanAndDelete(`${STATE_PREFIX}:*:${geofenceId}`);
+    await this.scanAndDelete(`${BREACH_PREFIX}:*:${geofenceId}`);
+  }
+
+  /**
+   * Cached breach for a single (device, geofence) — null when inside or
+   * never evaluated. Mobile fetches this for the persistent banner after
+   * restart so the user doesn't have to wait for the next ingest.
+   */
+  async getDeviceBreach(deviceId: string): Promise<GeofenceBreachEvent | null> {
+    const keys = await this.scanKeys(`${BREACH_PREFIX}:${deviceId}:*`);
+    if (keys.length === 0) return null;
+    const values = await this.redis.mget(...keys);
+    for (const raw of values) {
+      if (!raw) continue;
+      try {
+        return JSON.parse(raw) as GeofenceBreachEvent;
+      } catch {
+        // ignore malformed entry
+      }
+    }
+    return null;
   }
 
   async setBreach(event: GeofenceBreachEvent): Promise<void> {
-    await this.redis.set(this.breachKey(event.deviceId), JSON.stringify(event));
+    await this.redis.set(
+      this.breachKey(event.deviceId, event.geofenceId),
+      JSON.stringify(event),
+    );
   }
 
-  async clearBreach(deviceId: string): Promise<void> {
-    await this.redis.del(this.breachKey(deviceId));
-  }
-
-  async getBreach(deviceId: string): Promise<GeofenceBreachEvent | null> {
-    const raw = await this.redis.get(this.breachKey(deviceId));
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as GeofenceBreachEvent;
-    } catch {
-      return null;
-    }
+  async clearBreach(deviceId: string, geofenceId: string): Promise<void> {
+    await this.redis.del(this.breachKey(deviceId, geofenceId));
   }
 
   async listActiveBreaches(): Promise<GeofenceBreachEvent[]> {
-    const keys: string[] = [];
-    let cursor = '0';
-    do {
-      const [next, batch] = await this.redis.scan(
-        cursor,
-        'MATCH',
-        `${BREACH_PREFIX}:*`,
-        'COUNT',
-        200,
-      );
-      keys.push(...batch);
-      cursor = next;
-    } while (cursor !== '0');
+    const keys = await this.scanKeys(`${BREACH_PREFIX}:*`);
     if (keys.length === 0) return [];
-
     const values = await this.redis.mget(...keys);
     const result: GeofenceBreachEvent[] = [];
     for (const raw of values) {
@@ -101,5 +116,28 @@ export class GeofenceStateService {
       }
     }
     return result;
+  }
+
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [next, batch] = await this.redis.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        200,
+      );
+      keys.push(...batch);
+      cursor = next;
+    } while (cursor !== '0');
+    return keys;
+  }
+
+  private async scanAndDelete(pattern: string): Promise<void> {
+    const keys = await this.scanKeys(pattern);
+    if (keys.length === 0) return;
+    await this.redis.del(...keys);
   }
 }

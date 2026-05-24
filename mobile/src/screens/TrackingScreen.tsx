@@ -1,4 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
+import * as Battery from 'expo-battery';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import SosButton from '../components/SosButton';
 import { DEFAULT_TRACKING_INTERVAL_MS } from '../config/api';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { useLocation } from '../hooks/useLocation';
@@ -22,6 +24,11 @@ import type {
   LocationData,
 } from '../models/types';
 import { fetchTrackingInterval, sendIngestData } from '../services/apiService';
+import {
+  isBackgroundLocationActive,
+  startBackgroundLocation,
+  stopBackgroundLocation,
+} from '../services/backgroundLocationService';
 import {
   getCellTowerInfo,
   isCellInfoUnavailable,
@@ -65,6 +72,12 @@ export default function TrackingScreen() {
   const [mqttConnected, setMqttConnected] = useState(false);
   const [realtimeEvents, setRealtimeEvents] = useState<DeviceMovedEvent[]>([]);
   const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_TRACKING_INTERVAL_MS);
+  const [bgActive, setBgActive] = useState(false);
+  const [bgToggling, setBgToggling] = useState(false);
+  const [sosResult, setSosResult] = useState<{
+    state: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -145,7 +158,18 @@ export default function TrackingScreen() {
         `[GPS] flush → ${locations.length} fix(es) (fallback=${batch.length === 0})`,
       );
       const towers = await fetchCellTowers();
-      const payload: IngestPayload = { locations, cellTowers: towers };
+      let batteryLevel: number | undefined;
+      try {
+        const lvl = await Battery.getBatteryLevelAsync();
+        batteryLevel = Math.round(lvl * 100);
+      } catch {
+        // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
+      }
+      const payload: IngestPayload = {
+        locations,
+        cellTowers: towers,
+        batteryLevel,
+      };
 
       const sentOverMqtt = await publishTelemetry(storedData.deviceId, payload);
       if (!sentOverMqtt) {
@@ -249,6 +273,44 @@ export default function TrackingScreen() {
     });
   }, []);
 
+  // Sync trạng thái background task với UI khi mount.
+  useEffect(() => {
+    let cancelled = false;
+    void isBackgroundLocationActive().then((active) => {
+      if (!cancelled) setBgActive(active);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleBackground = useCallback(async () => {
+    if (bgToggling) return;
+    setBgToggling(true);
+    try {
+      if (bgActive) {
+        await stopBackgroundLocation();
+        setBgActive(false);
+      } else {
+        const res = await startBackgroundLocation();
+        if (res.ok) {
+          setBgActive(true);
+        } else if (res.reason) {
+          Alert.alert('Không bật được nền', res.reason);
+        }
+      }
+    } finally {
+      setBgToggling(false);
+    }
+  }, [bgActive, bgToggling]);
+
+  // Auto-dismiss SOS feedback after 3s.
+  useEffect(() => {
+    if (!sosResult) return;
+    const t = setTimeout(() => setSosResult(null), 3000);
+    return () => clearTimeout(t);
+  }, [sosResult]);
+
   // Tracking-specific commands (request_location_now, toggle_tracking).
   // ring_alarm and lock_device are handled globally in App.tsx so they
   // still work when the user is on a different screen.
@@ -333,6 +395,7 @@ export default function TrackingScreen() {
   }, []);
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.card}>
         <View style={styles.headerRow}>
@@ -435,6 +498,48 @@ export default function TrackingScreen() {
         </View>
       )}
 
+      <View style={styles.card}>
+        <View style={styles.headerRow}>
+          <Text style={styles.cardTitle}>Theo dõi nền</Text>
+          <View
+            style={[
+              styles.badge,
+              bgActive ? styles.badgeActive : styles.badgeIdle,
+            ]}
+          >
+            <Text
+              style={[
+                styles.badgeText,
+                bgActive ? styles.badgeTextActive : styles.badgeTextIdle,
+              ]}
+            >
+              {bgActive ? 'Đang chạy' : 'Tắt'}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.placeholder}>
+          Khi bật, ứng dụng tiếp tục gửi vị trí ngay cả khi đóng app. Cần cấp
+          quyền "Luôn cho phép" truy cập vị trí.
+        </Text>
+        <TouchableOpacity
+          style={[
+            styles.toggleBtn,
+            bgActive ? styles.stopBtn : styles.startBtn,
+          ]}
+          onPress={toggleBackground}
+          activeOpacity={0.7}
+          disabled={bgToggling}
+        >
+          {bgToggling ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.toggleText}>
+              {bgActive ? 'Tắt theo dõi nền' : 'Bật theo dõi nền'}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
       {realtimeEvents.length > 0 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Sự kiện realtime</Text>
@@ -451,6 +556,30 @@ export default function TrackingScreen() {
         </View>
       )}
     </ScrollView>
+    <SosButton
+      deviceId={storedData?.deviceId ?? null}
+      lastKnown={
+        location
+          ? {
+              lat: location.latitude,
+              lon: location.longitude,
+              accuracy: location.accuracy,
+            }
+          : null
+      }
+      onResult={(state, message) => setSosResult({ state, message })}
+    />
+    {sosResult && (
+      <View
+        style={[
+          stylesSos.toast,
+          sosResult.state === 'success' ? stylesSos.toastOk : stylesSos.toastErr,
+        ]}
+      >
+        <Text style={stylesSos.toastText}>{sosResult.message}</Text>
+      </View>
+    )}
+    </View>
   );
 }
 
@@ -580,4 +709,23 @@ const styles = StyleSheet.create({
   },
   eventTime: { fontSize: 12, color: '#999', width: 80 },
   eventInfo: { fontSize: 13, color: '#333', flex: 1 },
+});
+
+const stylesSos = StyleSheet.create({
+  toast: {
+    position: 'absolute',
+    bottom: 140,
+    left: 16,
+    right: 16,
+    padding: 14,
+    borderRadius: 10,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  toastOk: { backgroundColor: '#2E7D32' },
+  toastErr: { backgroundColor: '#C62828' },
+  toastText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
 });

@@ -9,7 +9,7 @@ import type { Request } from 'express';
 import type { JwtPayload } from './auth.service';
 
 export interface AuthedRequest extends Request {
-  admin: JwtPayload;
+  parentAccount: JwtPayload;
 }
 
 @Injectable()
@@ -25,7 +25,7 @@ export class JwtAuthGuard implements CanActivate {
     const token = header.slice('Bearer '.length).trim();
     try {
       const payload = await this.jwt.verifyAsync<JwtPayload>(token);
-      req.admin = payload;
+      req.parentAccount = payload;
       return true;
     } catch {
       throw new UnauthorizedException('Token không hợp lệ');

@@ -1,27 +1,40 @@
-export interface RegisterDeviceRequest {
-  fullName: string;
-  email: string;
-  address?: string;
-  citizenId: string;
-  phoneNumber: string;
-  device: {
+export type PersonType = 'CHILD' | 'ELDERLY';
+
+export interface PairDeviceRequest {
+  pairingCode: string;
+  personName: string;
+  personType: PersonType;
+  phoneNumber?: string;
+  device?: {
     model?: string;
     type?: string;
     os?: string;
   };
 }
 
-export interface RegisterDeviceResponse {
-  userId: string;
+export interface PairDeviceResponse {
   deviceId: string;
+  personName: string;
+  personType: PersonType;
 }
 
 export interface StoredDeviceData {
   deviceId: string;
-  userId: string;
-  fullName: string;
-  email: string;
-  registeredAt: string;
+  personName: string;
+  personType: PersonType;
+  pairedAt: string;
+}
+
+export interface SosRequest {
+  lat: number;
+  lon: number;
+  accuracy?: number;
+  batteryLevel?: number;
+}
+
+export interface SosResponse {
+  sosEventId: string;
+  triggeredAt: string;
 }
 
 export type RegistrationStatus = 'loading' | 'registered' | 'not_registered';
@@ -64,6 +77,8 @@ export interface IngestPayload {
   // fresh fix in the window we resend the last known one as heartbeat.
   locations: LocationData[];
   cellTowers: CellTower[];
+  /** Pin thiết bị (0-100), nếu lấy được. */
+  batteryLevel?: number;
 }
 
 export interface IngestResponse {
@@ -133,6 +148,11 @@ export interface DeviceDeletedEvent {
   deviceId: string;
 }
 
+export interface DeviceLockChangedEvent {
+  deviceId: string;
+  locked: boolean;
+}
+
 export interface CommandResultBody {
   commandId: string;
   success: boolean;
@@ -146,10 +166,9 @@ export interface TrackingIntervalResponse {
 }
 
 export type RootStackParamList = {
-  Register: undefined;
+  Pair: undefined;
   Tracking: undefined;
 };
 
 export const PHONE_REGEX = /^(0|\+84)[0-9]{9}$/;
-export const CITIZEN_ID_REGEX = /^[0-9]{9,12}$/;
-export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const PAIRING_CODE_REGEX = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/;

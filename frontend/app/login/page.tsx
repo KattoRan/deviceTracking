@@ -1,16 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, Lock, Radio, User } from "lucide-react";
+import { Loader2, Lock, Mail, Radio } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import axios from "axios";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const { admin, login, loading } = useAuth();
-  const [username, setUsername] = useState("");
+  const { parentAccount, login, loading } = useAuth();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,17 +19,17 @@ function LoginForm() {
   const redirectTo = params.get("from") || "/";
 
   useEffect(() => {
-    if (!loading && admin) {
+    if (!loading && parentAccount) {
       router.replace(redirectTo);
     }
-  }, [admin, loading, redirectTo, router]);
+  }, [parentAccount, loading, redirectTo, router]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      await login({ username: username.trim(), password });
+      await login({ email: email.trim().toLowerCase(), password });
       router.replace(redirectTo);
     } catch (err: unknown) {
       const msg =
@@ -52,10 +53,10 @@ function LoginForm() {
         </div>
         <div>
           <h1 className="text-xl font-bold tracking-tight text-slate-900">
-            Đăng nhập quản trị
+            Đăng nhập phụ huynh
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Hệ thống giám sát thiết bị
+            Giám sát người thân của bạn
           </p>
         </div>
       </div>
@@ -63,19 +64,19 @@ function LoginForm() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <label className="block">
           <span className="mb-1.5 block text-sm font-medium text-slate-700">
-            Tên đăng nhập
+            Email
           </span>
           <div className="relative">
-            <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               required
               disabled={submitting}
               className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 placeholder-slate-400 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50"
-              placeholder="admin"
+              placeholder="ban@example.com"
             />
           </div>
         </label>
@@ -114,6 +115,16 @@ function LoginForm() {
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
           {submitting ? "Đang đăng nhập…" : "Đăng nhập"}
         </button>
+
+        <p className="text-center text-sm text-slate-600">
+          Chưa có tài khoản?{" "}
+          <Link
+            href="/register"
+            className="font-medium text-emerald-600 hover:text-emerald-700"
+          >
+            Đăng ký phụ huynh
+          </Link>
+        </p>
       </form>
     </div>
   );

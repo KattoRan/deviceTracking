@@ -7,56 +7,70 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard, type AuthedRequest } from '../auth/jwt-auth.guard';
 import type { GeofenceBreachEvent } from '../events/events.gateway';
 import { DevicesService } from './devices.service';
 import { HistoryQueryDto } from './dto/history-query.dto';
-import { RegisterDeviceDto, RegisterDeviceResponseDto } from './dto/register-device.dto';
+import {
+  PairDeviceDto,
+  PairDeviceResponseDto,
+} from './dto/pair-device.dto';
 
 @ApiTags('devices')
 @Controller('api/v1/devices')
 export class DevicesController {
   constructor(private readonly devicesService: DevicesService) {}
 
-  @Post('register')
+  @Post('pair')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Đăng ký người dùng và thiết bị mới' })
-  @ApiCreatedResponse({ type: RegisterDeviceResponseDto })
-  @ApiConflictResponse({ description: 'Email / CCCD / số điện thoại đã tồn tại' })
-  register(@Body() dto: RegisterDeviceDto): Promise<RegisterDeviceResponseDto> {
-    return this.devicesService.register(dto);
+  @ApiOperation({
+    summary:
+      'Mobile: pair thiết bị mới bằng pairing code phụ huynh cung cấp + thông tin người được giám sát',
+  })
+  @ApiCreatedResponse({ type: PairDeviceResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Pairing code không hợp lệ' })
+  pair(@Body() dto: PairDeviceDto): Promise<PairDeviceResponseDto> {
+    return this.devicesService.pair(dto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Danh sách thiết bị kèm vị trí & BTS mới nhất' })
-  findAll() {
-    return this.devicesService.findAll();
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Danh sách thiết bị của phụ huynh' })
+  findAll(@Req() req: AuthedRequest) {
+    return this.devicesService.findAll(req.parentAccount.sub);
   }
 
   @Get(':id/history')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Lịch sử di chuyển trong khoảng [from, to] (mặc định: hôm nay → now)',
   })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
   getHistory(
+    @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: HistoryQueryDto,
   ) {
     return this.devicesService.getLocationHistory(
       id,
+      req.parentAccount.sub,
       query.from,
       query.to,
       query.minDistanceMeters,
@@ -75,24 +89,51 @@ export class DevicesController {
     return this.devicesService.getActiveBreach(id);
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Chi tiết thiết bị (chủ, vị trí, cell, BTS, khoảng cách)' })
+  @Get(':id/lock-status')
+  @ApiOperation({ summary: 'Trạng thái khóa của thiết bị (dùng cho mobile app)' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
-  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.devicesService.findOne(id);
+  getLockStatus(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.devicesService.getLockStatus(id);
+  }
+
+  @Patch(':id/lock')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Khóa / mở khóa thiết bị (phụ huynh)' })
+  @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
+  setLockStatus(
+    @Req() req: AuthedRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { locked: boolean },
+  ) {
+    return this.devicesService.setLockStatus(id, req.parentAccount.sub, body.locked);
+  }
+
+  @Get(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Chi tiết thiết bị (vị trí, cell, BTS, geofences, khoảng cách)' })
+  @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
+  findOne(
+    @Req() req: AuthedRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.devicesService.findOne(id, req.parentAccount.sub);
   }
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({
-    summary:
-      'Admin huỷ đăng ký thiết bị (cascade xoá lịch sử; xoá user nếu không còn thiết bị nào khác)',
-  })
+  @ApiOperation({ summary: 'Phụ huynh huỷ pair thiết bị (cascade xoá lịch sử)' })
   @ApiNoContentResponse({ description: 'Đã xoá' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
-  remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
-    return this.devicesService.remove(id);
+  remove(
+    @Req() req: AuthedRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<void> {
+    return this.devicesService.remove(id, req.parentAccount.sub);
   }
 }

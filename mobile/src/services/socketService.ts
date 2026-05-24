@@ -4,6 +4,7 @@ import type {
   CommandDispatchEvent,
   CommandResultBody,
   DeviceDeletedEvent,
+  DeviceLockChangedEvent,
   DeviceMovedEvent,
   GeofenceBreachEvent,
   TrackingIntervalChangedEvent,
@@ -14,6 +15,7 @@ type CommandCallback = (event: CommandDispatchEvent) => void;
 type TrackingIntervalCallback = (event: TrackingIntervalChangedEvent) => void;
 type GeofenceBreachCallback = (event: GeofenceBreachEvent) => void;
 type DeviceDeletedCallback = (event: DeviceDeletedEvent) => void;
+type DeviceLockChangedCallback = (event: DeviceLockChangedEvent) => void;
 
 let socket: Socket | null = null;
 let joinedDeviceId: string | null = null;
@@ -22,6 +24,7 @@ const commandListeners = new Set<CommandCallback>();
 const trackingIntervalListeners = new Set<TrackingIntervalCallback>();
 const geofenceBreachListeners = new Set<GeofenceBreachCallback>();
 const deviceDeletedListeners = new Set<DeviceDeletedCallback>();
+const deviceLockChangedListeners = new Set<DeviceLockChangedCallback>();
 
 function fanOut<T>(listeners: Set<(event: T) => void>, event: T): void {
   for (const cb of listeners) {
@@ -77,6 +80,9 @@ export function connectSocket(): Socket {
   );
   socket.on('device_deleted', (event: DeviceDeletedEvent) =>
     fanOut(deviceDeletedListeners, event),
+  );
+  socket.on('device_lock_changed', (event: DeviceLockChangedEvent) =>
+    fanOut(deviceLockChangedListeners, event),
   );
 
   // Re-join the device room on every connect/reconnect — socket.io rooms are
@@ -152,6 +158,14 @@ export function onDeviceDeleted(cb: DeviceDeletedCallback): () => void {
   deviceDeletedListeners.add(cb);
   return () => {
     deviceDeletedListeners.delete(cb);
+  };
+}
+
+export function onDeviceLockChanged(cb: DeviceLockChangedCallback): () => void {
+  if (!socket) connectSocket();
+  deviceLockChangedListeners.add(cb);
+  return () => {
+    deviceLockChangedListeners.delete(cb);
   };
 }
 

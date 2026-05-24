@@ -15,8 +15,10 @@ const STATUS_COLOR: Record<Device["status"], string> = {
   offline: "#64748b",
 };
 
-function deviceIcon(status: Device["status"], selected: boolean) {
-  const color = STATUS_COLOR[status];
+const SPOOF_COLOR = "#dc2626";
+
+function deviceIcon(status: Device["status"], selected: boolean, spoofing = false) {
+  const color = spoofing ? SPOOF_COLOR : STATUS_COLOR[status];
   const size = selected ? 56 : 36;
   const iconSvg = selected ? 22 : 16;
   const ring = selected
@@ -40,6 +42,11 @@ function deviceIcon(status: Device["status"], selected: boolean) {
             <circle cx="12" cy="18" r="1" fill="white"/>
           </svg>
         </div>
+        ${spoofing ? `<div style="position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;background:#dc2626;border:2px solid #fff;display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>` : ""}
       </div>`,
     className: "device-marker",
     iconSize: [size, size],
@@ -128,7 +135,7 @@ export default function DeviceMarker({
 
       <Marker
         position={[device.latitude, device.longitude]}
-        icon={deviceIcon(device.status, selected)}
+        icon={deviceIcon(device.status, selected, device.spoofingSuspected)}
         zIndexOffset={selected ? 1000 : 0}
         opacity={isApprox ? 0.7 : 1}
         eventHandlers={{
@@ -149,6 +156,21 @@ export default function DeviceMarker({
                 {device.status === "online" ? "online" : "offline"}
               </span>
             </div>
+            {device.spoofingSuspected && (
+              <div
+                style={{
+                  fontSize: 11,
+                  marginBottom: 4,
+                  color: "#dc2626",
+                  fontWeight: 600,
+                }}
+              >
+                Nghi ngờ fake GPS
+                {device.gpsBtsDistanceM != null
+                  ? ` · cách BTS ${device.gpsBtsDistanceM >= 1000 ? `${(device.gpsBtsDistanceM / 1000).toFixed(1)}km` : `${device.gpsBtsDistanceM}m`}`
+                  : ""}
+              </div>
+            )}
             {qualityLabel && (
               <div
                 style={{

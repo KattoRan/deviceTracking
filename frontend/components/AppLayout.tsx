@@ -12,6 +12,7 @@ import {
   Radio,
   Settings,
   Shield,
+  Siren,
   UserCircle,
   X,
   type LucideIcon,
@@ -35,10 +36,12 @@ const NAV_ITEMS: NavItem[] = [
   { name: "Giám sát", icon: MapPin, href: "/tracking" },
   { name: "Lịch sử", icon: History, href: "/history" },
   { name: "Vùng giám sát", icon: Shield, href: "/geofences" },
+  { name: "SOS", icon: Siren, href: "/sos" },
   { name: "Quản lý", icon: Settings, href: "/manage-devices" },
+  { name: "Tài khoản", icon: UserCircle, href: "/account" },
 ];
 
-const PUBLIC_ROUTES = new Set(["/login"]);
+const PUBLIC_ROUTES = new Set(["/login", "/register"]);
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -48,24 +51,24 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { admin, loading, logout } = useAuth();
+  const { parentAccount, loading, logout } = useAuth();
 
   const isPublic = PUBLIC_ROUTES.has(pathname);
 
   useEffect(() => {
     if (loading) return;
-    if (!admin && !isPublic) {
+    if (!parentAccount && !isPublic) {
       const from = encodeURIComponent(pathname);
       router.replace(`/login?from=${from}`);
     }
-  }, [admin, loading, isPublic, pathname, router]);
+  }, [parentAccount, loading, isPublic, pathname, router]);
 
-  // Login page renders standalone (no nav, no guard).
+  // Login/Register pages render standalone (no nav, no guard).
   if (isPublic) {
     return <>{children}</>;
   }
 
-  if (loading || !admin) {
+  if (loading || !parentAccount) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
         Đang tải…
@@ -119,7 +122,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               <GeofenceBell />
               <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 md:flex">
                 <UserCircle className="h-4 w-4 text-slate-500" />
-                <span className="font-medium">{admin.username}</span>
+                <span className="font-medium">{parentAccount.displayName ?? parentAccount.email}</span>
               </div>
               <button
                 type="button"
@@ -173,7 +176,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
               <div className="flex items-center gap-2 text-sm text-slate-700">
                 <UserCircle className="h-4 w-4 text-slate-500" />
-                <span className="font-medium">{admin.username}</span>
+                <span className="font-medium">{parentAccount.displayName ?? parentAccount.email}</span>
               </div>
               <button
                 type="button"

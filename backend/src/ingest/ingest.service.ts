@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import axios from 'axios';
+import { AlertsService } from '../alerts/alerts.service';
 import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
@@ -61,6 +62,7 @@ export class IngestService {
     private readonly btsService: BtsService,
     private readonly eventsGateway: EventsGateway,
     private readonly geofenceState: GeofenceStateService,
+    private readonly alerts: AlertsService,
   ) {}
 
   async saveData(
@@ -74,10 +76,15 @@ export class IngestService {
       where: { id: deviceId },
       select: {
         id: true,
+        person_name: true,
         phone_number: true,
-        user: { select: { full_name: true } },
-        geofence: {
-          select: { id: true, name: true, lat: true, lon: true, radius_m: true },
+        parent_account_id: true,
+        device_geofences: {
+          include: {
+            geofence: {
+              select: { id: true, name: true, lat: true, lon: true, radius_m: true },
+            },
+          },
         },
       },
     });
@@ -125,6 +132,30 @@ export class IngestService {
       }
     }
 
+    // --- GPS spoofing detection ---
+    // Fake-GPS apps change the OS location but cannot change which cell
+    // tower the modem is attached to. If the reported GPS position is
+    // unreasonably far from the connected BTS, the fix is likely spoofed.
+    const SPOOF_RANGE_MULTIPLIER = 2;
+    const DEFAULT_BTS_RANGE_M = 2000; // fallback when BTS has no range data
+    let spoofingSuspected = false;
+    let gpsBtsDistanceM: number | null = null;
+    if (connectedBts) {
+      gpsBtsDistanceM = Math.round(
+        haversineMeters(latest.latitude, latest.longitude, connectedBts.lat, connectedBts.lon),
+      );
+      const btsRange = connectedBts.range ?? DEFAULT_BTS_RANGE_M;
+      spoofingSuspected = gpsBtsDistanceM > btsRange * SPOOF_RANGE_MULTIPLIER;
+      if (spoofingSuspected) {
+        this.logger.warn(
+          `GPS SPOOFING suspected device=${deviceId} ` +
+            `gps=(${latest.latitude},${latest.longitude}) ` +
+            `bts=(${connectedBts.lat},${connectedBts.lon}) ` +
+            `dist=${gpsBtsDistanceM}m range=${btsRange}m`,
+        );
+      }
+    }
+
     this.eventsGateway.emitDeviceMoved({
       deviceId,
       lat: latest.latitude,
@@ -147,26 +178,39 @@ export class IngestService {
         isServing: c.isServing,
       })),
       connectedBts,
+      spoofingSuspected,
+      gpsBtsDistanceM,
     });
 
-    void this.persistInBackground(deviceId, dto.locations, cells, latestAt);
+    void this.persistInBackground(
+      deviceId,
+      dto.locations,
+      cells,
+      latestAt,
+      dto.batteryLevel,
+      device.person_name,
+      device.parent_account_id,
+    );
     if (servingCell) void this.lookupBtsInBackground(servingCell);
 
     // Consumer policy: only fixes the OS confirmed as real GNSS feed the
     // geofence evaluator. WiFi/cell-based fixes drift hundreds of metres
     // around a stationary device — running the breach check on them
-    // produces phantom "ra khỏi vùng" alerts. The dashboard still sees the
-    // device move via the realtime broadcast above; we just don't trigger
-    // alarms off untrustworthy positions.
-    if (device.geofence && latestQuality === 'gps') {
-      void this.evaluateGeofence(
-        deviceId,
-        device.user?.full_name ?? device.phone_number,
-        latest.latitude,
-        latest.longitude,
-        device.geofence,
-        latestAt,
-      );
+    // produces phantom "ra khỏi vùng" alerts. Also skip when GPS spoofing
+    // is suspected.
+    if (device.device_geofences.length > 0 && latestQuality === 'gps' && !spoofingSuspected) {
+      const deviceName = device.person_name;
+      for (const dg of device.device_geofences) {
+        void this.evaluateGeofence(
+          deviceId,
+          deviceName,
+          device.parent_account_id,
+          latest.latitude,
+          latest.longitude,
+          dg.geofence,
+          latestAt,
+        );
+      }
     }
 
     return { success: true, message: 'Data received' };
@@ -175,6 +219,7 @@ export class IngestService {
   private async evaluateGeofence(
     deviceId: string,
     deviceName: string | null,
+    parentAccountId: string,
     lat: number,
     lon: number,
     geofence: {
@@ -191,8 +236,8 @@ export class IngestService {
       const centerLon = Number(geofence.lon);
       const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
       const current = distanceM > geofence.radius_m ? 'outside' : 'inside';
-      const previous = await this.geofenceState.get(deviceId);
-      await this.geofenceState.set(deviceId, current);
+      const previous = await this.geofenceState.get(deviceId, geofence.id);
+      await this.geofenceState.set(deviceId, geofence.id, current);
 
       const event = {
         deviceId,
@@ -211,25 +256,18 @@ export class IngestService {
         timestamp: now.toISOString(),
       };
 
-      // Reflect current truth in the breach store on EVERY ingest, regardless
-      // of whether a transition fired. This keeps the dashboard's
-      // /breaches/active list accurate, refreshes the distance/timestamp shown
-      // in the persistent banner, and self-heals from any earlier inconsistent
-      // state (e.g. ingests that ran before the breach store existed).
       if (current === 'outside') {
         await this.geofenceState.setBreach(event);
       } else {
-        await this.geofenceState.clearBreach(deviceId);
+        await this.geofenceState.clearBreach(deviceId, geofence.id);
       }
 
-      // Socket emit only on transitions — broadcasting every ingest would
-      // spam the dashboard. First reading suppresses only the inside case;
-      // an already-outside device on first read is worth announcing.
       const isTransition =
         previous === null ? current === 'outside' : previous !== current;
       if (!isTransition) return;
 
       this.eventsGateway.emitGeofenceBreach(event);
+      void this.alerts.dispatchGeofenceBreachPush(parentAccountId, event);
 
       this.logger.warn(
         `Geofence ${current === 'outside' ? 'BREACH' : 'RETURN'} ` +
@@ -247,6 +285,9 @@ export class IngestService {
     locations: LocationDto[],
     cells: NormalizedCell[],
     latestAt: Date,
+    batteryLevel: number | undefined,
+    personName: string | null,
+    parentAccountId: string,
   ): Promise<void> {
     try {
       const latest = locations[locations.length - 1];
@@ -257,6 +298,36 @@ export class IngestService {
         latest.latitude,
         latest.longitude,
       );
+
+      // Pre-check battery state to know whether we need to flip alert flags
+      // alongside updating last_seen. Hysteresis: arm alert at <20%, disarm
+      // at ≥25% so a device hovering around 20% doesn't ping repeatedly.
+      const LOW_BATTERY_THRESHOLD = 20;
+      const LOW_BATTERY_RESET_THRESHOLD = 25;
+      let lowBatteryTransition: 'arm' | 'disarm' | null = null;
+      let clearedOfflineFlag = false;
+      const prev = await this.prisma.devices.findUnique({
+        where: { id: deviceId },
+        select: {
+          is_low_battery_alerted: true,
+          is_offline_alerted: true,
+        },
+      });
+      if (batteryLevel != null && prev) {
+        if (
+          batteryLevel < LOW_BATTERY_THRESHOLD &&
+          !prev.is_low_battery_alerted
+        ) {
+          lowBatteryTransition = 'arm';
+        } else if (
+          batteryLevel >= LOW_BATTERY_RESET_THRESHOLD &&
+          prev.is_low_battery_alerted
+        ) {
+          lowBatteryTransition = 'disarm';
+        }
+      }
+      // Device just sent a heartbeat → no longer "offline".
+      clearedOfflineFlag = !!prev?.is_offline_alerted;
 
       await this.prisma.$transaction(async (tx) => {
         await tx.location_history.createMany({
@@ -291,11 +362,46 @@ export class IngestService {
           });
         }
 
+        const updateData: {
+          last_seen: Date;
+          last_battery?: number;
+          is_low_battery_alerted?: boolean;
+          is_offline_alerted?: boolean;
+        } = { last_seen: latestAt };
+        if (batteryLevel != null) updateData.last_battery = batteryLevel;
+        if (lowBatteryTransition === 'arm') updateData.is_low_battery_alerted = true;
+        else if (lowBatteryTransition === 'disarm') updateData.is_low_battery_alerted = false;
+        if (clearedOfflineFlag) updateData.is_offline_alerted = false;
+
         await tx.devices.update({
           where: { id: deviceId },
-          data: { last_seen: latestAt },
+          data: updateData,
         });
       });
+
+      // Emit alerts AFTER the transaction commits so consumers never see
+      // a stale device row. battery_update fires every batch for the
+      // dashboard meter; low_battery only on the arm transition.
+      if (batteryLevel != null) {
+        this.eventsGateway.emitBatteryUpdate({
+          deviceId,
+          batteryLevel,
+          timestamp: latestAt.toISOString(),
+        });
+      }
+      if (lowBatteryTransition === 'arm' && batteryLevel != null) {
+        const lowEvent = {
+          deviceId,
+          deviceName: personName,
+          batteryLevel,
+          timestamp: latestAt.toISOString(),
+        };
+        this.eventsGateway.emitLowBattery(lowEvent);
+        void this.alerts.dispatchLowBatteryPush(parentAccountId, lowEvent);
+        this.logger.warn(
+          `Low battery device=${deviceId} (${personName ?? '?'}) ${batteryLevel}%`,
+        );
+      }
 
       const address = await addressPromise;
       if (address) {

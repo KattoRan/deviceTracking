@@ -81,7 +81,7 @@ export default function ManageDevicesPage() {
       if (!q) return true;
       return (
         d.name.toLowerCase().includes(q) ||
-        d.phone_number.toLowerCase().includes(q) ||
+        (d.phone_number?.toLowerCase().includes(q) ?? false) ||
         (d.model ?? "").toLowerCase().includes(q) ||
         d.id.toLowerCase().includes(q)
       );
@@ -435,7 +435,7 @@ function DetailDrawer({
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-slate-900">
-                {detail?.owner?.full_name || "Chi tiết thiết bị"}
+                {detail?.person_name || "Chi tiết thiết bị"}
               </p>
               <p className="truncate text-xs text-slate-500">{detail?.model || "--"}</p>
             </div>
@@ -484,11 +484,18 @@ function DetailDrawer({
               )}
             </div>
 
-            <DetailSection icon={User} title="Chủ sở hữu">
-              <DetailRow label="Họ tên" value={detail.owner?.full_name} />
-              <DetailRow label="Email" value={detail.owner?.email} />
-              <DetailRow label="CCCD" value={detail.owner?.citizen_id} />
-              <DetailRow label="Địa chỉ" value={detail.owner?.address} />
+            <DetailSection icon={User} title="Người được giám sát">
+              <DetailRow label="Tên" value={detail.person_name} />
+              <DetailRow
+                label="Loại"
+                value={detail.person_type === "CHILD" ? "Trẻ em" : "Người già"}
+              />
+              {detail.last_battery != null && (
+                <DetailRow
+                  label="Pin"
+                  value={`${detail.last_battery}%`}
+                />
+              )}
             </DetailSection>
 
             <DetailSection icon={Smartphone} title="Thiết bị">
@@ -578,7 +585,7 @@ function DetailDrawer({
       </aside>
       {confirmingDelete && (
         <DeleteConfirmModal
-          deviceName={detail?.owner?.full_name || detail?.phone_number || deviceId}
+          deviceName={detail?.person_name || detail?.phone_number || deviceId}
           deleting={deleting}
           error={deleteError}
           onCancel={() => {

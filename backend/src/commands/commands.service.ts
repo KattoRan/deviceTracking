@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -42,12 +43,19 @@ export class CommandsService {
     private readonly events: EventsGateway,
   ) {}
 
-  async createCommand(deviceId: string, dto: CreateCommandDto) {
+  async createCommand(
+    deviceId: string,
+    parentAccountId: string,
+    dto: CreateCommandDto,
+  ) {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      select: { id: true },
+      select: { id: true, parent_account_id: true },
     });
     if (!device) throw new NotFoundException('Device not found');
+    if (device.parent_account_id !== parentAccountId) {
+      throw new ForbiddenException('Không có quyền với thiết bị này');
+    }
 
     if (!COMMANDS.includes(dto.command)) {
       throw new BadRequestException(`Unknown command: ${dto.command}`);
@@ -84,12 +92,19 @@ export class CommandsService {
     };
   }
 
-  async listForDevice(deviceId: string, query: ListCommandsQueryDto) {
+  async listForDevice(
+    deviceId: string,
+    parentAccountId: string,
+    query: ListCommandsQueryDto,
+  ) {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      select: { id: true },
+      select: { id: true, parent_account_id: true },
     });
     if (!device) throw new NotFoundException('Device not found');
+    if (device.parent_account_id !== parentAccountId) {
+      throw new ForbiddenException('Không có quyền với thiết bị này');
+    }
 
     const where = {
       device_id: deviceId,

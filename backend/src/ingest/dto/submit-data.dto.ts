@@ -105,4 +105,13 @@ export class SubmitDataDto {
   @ValidateNested({ each: true })
   @Type(() => CellTowerDto)
   cellTowers?: CellTowerDto[];
+
+  /**
+   * Pin thiết bị (0–100). Khi <20% và trước đó ≥20%, server bắn alert
+   * low_battery + push notification cho phụ huynh.
+   */
+  @ApiPropertyOptional({ example: 42, minimum: 0, maximum: 100 })
+  @IsOptional()
+  @IsInt()
+  batteryLevel?: number;
 }

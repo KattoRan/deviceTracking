@@ -1,7 +1,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Vibration, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import BreachBellButton from './src/components/BreachBellButton';
@@ -10,6 +10,7 @@ import ReturnedToast from './src/components/ReturnedToast';
 import { GeofenceAlertProvider } from './src/contexts/GeofenceAlertContext';
 import { DeviceInfoProvider, useDeviceInfo } from './src/hooks/useDeviceInfo';
 import type { CommandDispatchEvent, RootStackParamList } from './src/models/types';
+import { fetchLockStatus } from './src/services/apiService';
 import {
   ackCommand,
   connectSocket,
@@ -17,10 +18,11 @@ import {
   joinDeviceRoom,
   onCommand,
   onDeviceDeleted,
+  onDeviceLockChanged,
   sendCommandResult,
 } from './src/services/socketService';
 import { disconnectMqtt } from './src/services/mqttService';
-import RegisterScreen from './src/screens/RegisterScreen';
+import PairScreen from './src/screens/PairScreen';
 import TrackingScreen from './src/screens/TrackingScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -39,7 +41,8 @@ export default function App() {
 
 function AppContent() {
   const { registrationStatus, storedData, clearDeviceData } = useDeviceInfo();
-  const [lockMessage, setLockMessage] = useState<string | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
+  const [lockChecking, setLockChecking] = useState(true);
 
   // Keep the Socket.IO connection open for the lifetime of the app once
   // the device is registered — every screen that listens for `device_moved`
@@ -50,6 +53,40 @@ function AppContent() {
     connectSocket();
     joinDeviceRoom(storedData.deviceId);
     return () => disconnectSocket();
+  }, [registrationStatus, storedData?.deviceId]);
+
+  // Check lock status from server on app start. If locked, the app blocks
+  // on the LockOverlay and never shows TrackingScreen.
+  useEffect(() => {
+    if (registrationStatus !== 'registered' || !storedData?.deviceId) return;
+    let cancelled = false;
+    setLockChecking(true);
+    fetchLockStatus(storedData.deviceId)
+      .then((res) => {
+        if (!cancelled) setIsLocked(res.locked);
+      })
+      .catch(() => {
+        // If we can't reach the server, assume unlocked so the app works
+        // offline. The socket listener below will lock it in real-time once
+        // connectivity is restored.
+        if (!cancelled) setIsLocked(false);
+      })
+      .finally(() => {
+        if (!cancelled) setLockChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [registrationStatus, storedData?.deviceId]);
+
+  // Real-time lock/unlock via socket — admin toggles from dashboard.
+  useEffect(() => {
+    if (registrationStatus !== 'registered' || !storedData?.deviceId) return;
+    const myId = storedData.deviceId;
+    return onDeviceLockChanged((event) => {
+      if (event.deviceId !== myId) return;
+      setIsLocked(event.locked);
+    });
   }, [registrationStatus, storedData?.deviceId]);
 
   // Admin-triggered deletion: when the backend signals that this device
@@ -65,15 +102,16 @@ function AppContent() {
       void clearDeviceData();
       Alert.alert(
         'Thiết bị đã bị huỷ',
-        'Quản trị viên đã huỷ đăng ký thiết bị này. Vui lòng đăng ký lại để tiếp tục sử dụng.',
+        'Phụ huynh đã huỷ ghép thiết bị này. Vui lòng ghép lại để tiếp tục sử dụng.',
       );
     });
   }, [registrationStatus, storedData?.deviceId, clearDeviceData]);
 
-  // Global handlers — ring_alarm and lock_device must work regardless of
-  // which screen the user is on, so they live here at the app root.
-  // TrackingScreen handles request_location_now and toggle_tracking since
-  // those depend on its local tracking state.
+  // Global handler — ring_alarm must work regardless of which screen the
+  // user is on, so it lives here at the app root. TrackingScreen handles
+  // request_location_now and toggle_tracking since those depend on its
+  // local tracking state. lock_device is now managed via the persistent
+  // is_locked field and the device_lock_changed socket event above.
   useEffect(() => {
     if (registrationStatus !== 'registered') return;
     return onCommand((event: CommandDispatchEvent) => {
@@ -83,27 +121,16 @@ function AppContent() {
           1,
           Math.min(60, Number(event.payload?.durationSec) || 10),
         );
-        // Pattern: 500ms on / 200ms off, repeating for `durationSec`.
-        // We cancel after the duration rather than relying on the pattern
-        // length so the vibration stops exactly when we report success.
         Vibration.vibrate([0, 500, 200], true);
         setTimeout(() => {
           Vibration.cancel();
           sendCommandResult({ commandId: event.commandId, success: true });
         }, durationSec * 1000);
-      } else if (event.command === 'lock_device') {
-        ackCommand(event.commandId);
-        const msg =
-          typeof event.payload?.message === 'string'
-            ? (event.payload.message as string)
-            : 'Thiết bị đã bị khóa';
-        setLockMessage(msg);
-        sendCommandResult({ commandId: event.commandId, success: true });
       }
     });
   }, [registrationStatus]);
 
-  if (registrationStatus === 'loading') {
+  if (registrationStatus === 'loading' || (registrationStatus === 'registered' && lockChecking)) {
     return (
       <View style={styles.loader}>
         <ActivityIndicator size="large" color="#1976D2" />
@@ -141,17 +168,14 @@ function AppContent() {
               />
             ) : (
               <Stack.Screen
-                name="Register"
-                component={RegisterScreen}
-                options={{ title: 'Đăng ký thiết bị' }}
+                name="Pair"
+                component={PairScreen}
+                options={{ title: 'Ghép thiết bị' }}
               />
             )}
           </Stack.Navigator>
         </NavigationContainer>
-        <LockOverlay
-          visible={lockMessage != null}
-          message={lockMessage ?? undefined}
-        />
+        <LockOverlay visible={isLocked} />
         <ReturnedToast />
       </GeofenceAlertProvider>
     </SafeAreaProvider>

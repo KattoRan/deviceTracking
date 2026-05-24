@@ -3,8 +3,10 @@ import type {
   GeofenceBreachEvent,
   IngestPayload,
   IngestResponse,
-  RegisterDeviceRequest,
-  RegisterDeviceResponse,
+  PairDeviceRequest,
+  PairDeviceResponse,
+  SosRequest,
+  SosResponse,
   TrackingIntervalResponse,
 } from '../models/types';
 
@@ -63,12 +65,23 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   return body as T;
 }
 
-export function registerDevice(
-  data: RegisterDeviceRequest,
-): Promise<RegisterDeviceResponse> {
-  return request<RegisterDeviceResponse>(API_ENDPOINTS.REGISTER_DEVICE, {
+export function pairDevice(
+  data: PairDeviceRequest,
+): Promise<PairDeviceResponse> {
+  return request<PairDeviceResponse>(API_ENDPOINTS.PAIR_DEVICE, {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export function triggerSos(
+  deviceId: string,
+  data: SosRequest,
+): Promise<SosResponse> {
+  return request<SosResponse>(API_ENDPOINTS.SOS, {
+    method: 'POST',
+    body: JSON.stringify(data),
+    headers: { 'x-device-id': deviceId },
   });
 }
 
@@ -87,6 +100,19 @@ export function fetchTrackingInterval(): Promise<TrackingIntervalResponse> {
   return request<TrackingIntervalResponse>('api/v1/settings/tracking-interval', {
     method: 'GET',
   });
+}
+
+/**
+ * Returns whether the device is currently locked by the admin. Called on
+ * app launch so a locked device never reaches the Tracking screen.
+ */
+export function fetchLockStatus(
+  deviceId: string,
+): Promise<{ locked: boolean }> {
+  return request<{ locked: boolean }>(
+    `api/v1/devices/${deviceId}/lock-status`,
+    { method: 'GET' },
+  );
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   Check,
   Loader2,
   Lock,
+  LockOpen,
   MapPin,
   Power,
   X,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import commandService from "@/services/commandService";
+import deviceService from "@/services/deviceService";
 import type {
   CommandName,
   CommandPayload,
@@ -23,6 +25,8 @@ import { useCommandSocket } from "@/hooks/useCommandSocket";
 
 interface RemoteControlPanelProps {
   deviceId: string;
+  isLocked?: boolean;
+  onLockChange?: (locked: boolean) => void;
 }
 
 interface ActiveCommand {
@@ -54,11 +58,12 @@ const COMMAND_LABEL: Record<CommandName, string> = {
   lock_device: "Khóa thiết bị",
 };
 
-export default function RemoteControlPanel({ deviceId }: RemoteControlPanelProps) {
+export default function RemoteControlPanel({ deviceId, isLocked, onLockChange }: RemoteControlPanelProps) {
   const [active, setActive] = useState<ActiveCommand | null>(null);
   const [history, setHistory] = useState<CommandRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  const [lockLoading, setLockLoading] = useState(false);
 
   // `toggle_tracking` needs both enable/disable — we keep a local hint toggled
   // each time the user presses the button. The true source of truth lives on
@@ -170,6 +175,19 @@ export default function RemoteControlPanel({ deviceId }: RemoteControlPanelProps
     [active, deviceId],
   );
 
+  const toggleLock = useCallback(async () => {
+    const newLocked = !isLocked;
+    setLockLoading(true);
+    try {
+      await deviceService.setLockStatus(deviceId, newLocked);
+      onLockChange?.(newLocked);
+    } catch {
+      // failed — state stays the same
+    } finally {
+      setLockLoading(false);
+    }
+  }, [deviceId, isLocked, onLockChange]);
+
   return (
     <div className="border-b border-slate-200 p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -209,15 +227,27 @@ export default function RemoteControlPanel({ deviceId }: RemoteControlPanelProps
           disabled={isBusy(active)}
           tone={trackingHint ? "emerald" : "slate"}
         />
-        <CommandButton
-          icon={Lock}
-          label="Khóa thiết bị"
-          onClick={() =>
-            sendCommand("lock_device", { message: "Thiết bị đã bị khóa" })
-          }
-          disabled={isBusy(active)}
-          tone="red"
-        />
+        <button
+          type="button"
+          onClick={toggleLock}
+          disabled={lockLoading}
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            isLocked
+              ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+              : "border-slate-200 bg-white text-slate-700 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+          }`}
+        >
+          {lockLoading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : isLocked ? (
+            <LockOpen className="h-3.5 w-3.5" />
+          ) : (
+            <Lock className="h-3.5 w-3.5" />
+          )}
+          <span className="truncate">
+            {isLocked ? "Mở khóa" : "Khóa thiết bị"}
+          </span>
+        </button>
       </div>
 
       {active && (

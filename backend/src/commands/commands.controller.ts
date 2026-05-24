@@ -8,19 +8,25 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiBearerAuth,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { JwtAuthGuard, type AuthedRequest } from '../auth/jwt-auth.guard';
 import { CommandsService } from './commands.service';
 import { CommandResponseDto, CreateCommandDto } from './dto/create-command.dto';
 import { ListCommandsQueryDto } from './dto/list-commands.dto';
 
 @ApiTags('commands')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('api/v1')
 export class CommandsController {
   constructor(private readonly commandsService: CommandsService) {}
@@ -32,19 +38,21 @@ export class CommandsController {
   @ApiBadRequestResponse({ description: 'Command không hợp lệ hoặc payload sai' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
   createCommand(
+    @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: CreateCommandDto,
   ) {
-    return this.commandsService.createCommand(id, dto);
+    return this.commandsService.createCommand(id, req.parentAccount.sub, dto);
   }
 
   @Get('devices/:id/commands')
   @ApiOperation({ summary: 'Lịch sử lệnh đã gửi cho thiết bị' })
   listForDevice(
+    @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: ListCommandsQueryDto,
   ) {
-    return this.commandsService.listForDevice(id, query);
+    return this.commandsService.listForDevice(id, req.parentAccount.sub, query);
   }
 
   @Get('commands/:commandId')

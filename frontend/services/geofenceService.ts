@@ -72,6 +72,17 @@ export const geofenceService = {
     );
     return data;
   },
+
+  setDevices: async (
+    geofenceId: string,
+    deviceIds: string[],
+  ): Promise<GeofenceDetail> => {
+    const { data } = await apiClient.put<GeofenceDetail>(
+      `api/v1/geofences/${geofenceId}/devices`,
+      { deviceIds },
+    );
+    return data;
+  },
 };
 
 export default geofenceService;

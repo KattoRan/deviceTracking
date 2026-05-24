@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import AppLayout from "@/components/AppLayout";
 import { AuthProvider } from "@/components/AuthProvider";
+import PwaRegister from "@/components/PwaRegister";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,7 +17,19 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "deviceTracking",
-  description: "Giám sát thiết bị qua GPS và trạm BTS",
+  description: "Giám sát vị trí trẻ em và người già qua GPS và trạm BTS",
+  appleWebApp: {
+    capable: true,
+    title: "deviceTracking",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#059669",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -30,6 +43,7 @@ export default function RootLayout({
       <body className="min-h-full">
         <AuthProvider>
           <AppLayout>{children}</AppLayout>
+          <PwaRegister />
         </AuthProvider>
       </body>
     </html>

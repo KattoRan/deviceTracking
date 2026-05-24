@@ -16,8 +16,9 @@ export const MQTT_URL =
   process.env.EXPO_PUBLIC_MQTT_URL || 'ws://localhost:9001';
 
 export const API_ENDPOINTS = {
-  REGISTER_DEVICE: 'api/v1/devices/register',
+  PAIR_DEVICE: 'api/v1/devices/pair',
   INGEST: 'api/v1/ingest',
+  SOS: 'api/v1/devices/sos',
 } as const;
 
 export const REQUEST_TIMEOUT_MS = 15_000;

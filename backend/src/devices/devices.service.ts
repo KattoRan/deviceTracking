@@ -1,9 +1,20 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { Prisma, PersonType } from '@prisma/client';
 import { EventsGateway, type GeofenceBreachEvent } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterDeviceDto } from './dto/register-device.dto';
+import { normalizePairingCode } from '../auth/pairing-code.util';
+import {
+  PairDeviceDto,
+  PairDeviceResponseDto,
+  PersonTypeDto,
+} from './dto/pair-device.dto';
 import type { HistoryQualityMode } from './dto/history-query.dto';
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
@@ -40,50 +51,76 @@ export class DevicesService {
    * waiting for the next transition event over the socket.
    */
   async getActiveBreach(deviceId: string): Promise<GeofenceBreachEvent | null> {
-    return this.geofenceState.getBreach(deviceId);
+    return this.geofenceState.getDeviceBreach(deviceId);
   }
 
-  async register(dto: RegisterDeviceDto): Promise<{ userId: string; deviceId: string }> {
-    return this.prisma.$transaction(async (tx) => {
-      const [emailExists, citizenExists, phoneExists] = await Promise.all([
-        tx.users.findUnique({ where: { email: dto.email }, select: { id: true } }),
-        tx.users.findUnique({ where: { citizen_id: dto.citizenId }, select: { id: true } }),
-        tx.devices.findUnique({ where: { phone_number: dto.phoneNumber }, select: { id: true } }),
-      ]);
-
-      if (emailExists) throw new ConflictException('Email đã được đăng ký');
-      if (citizenExists) throw new ConflictException('Số CCCD đã được đăng ký');
-      if (phoneExists) throw new ConflictException('Số điện thoại đã được đăng ký');
-
-      const user = await tx.users.create({
-        data: {
-          full_name: dto.fullName.trim(),
-          email: dto.email.trim().toLowerCase(),
-          address: dto.address?.trim() || null,
-          citizen_id: dto.citizenId,
-        },
-        select: { id: true },
-      });
-
-      const device = await tx.devices.create({
-        data: {
-          user_id: user.id,
-          phone_number: dto.phoneNumber,
-          model: dto.device.model?.trim() || null,
-          type: dto.device.type?.trim() || null,
-          device_os: dto.device.os?.trim() || null,
-        },
-        select: { id: true },
-      });
-
-      this.logger.log(`Registered user=${user.id} device=${device.id}`);
-      return { userId: user.id, deviceId: device.id };
+  async getLockStatus(deviceId: string): Promise<{ locked: boolean }> {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: { is_locked: true },
     });
+    if (!device) throw new NotFoundException('Device not found');
+    return { locked: device.is_locked };
   }
 
-  async findAll() {
+  async setLockStatus(
+    deviceId: string,
+    parentAccountId: string,
+    locked: boolean,
+  ): Promise<{ locked: boolean }> {
+    await this.assertOwnership(deviceId, parentAccountId);
+
+    await this.prisma.devices.update({
+      where: { id: deviceId },
+      data: { is_locked: locked },
+    });
+
+    this.events.emitDeviceLockChanged({ deviceId, locked });
+    this.logger.log(`Device ${deviceId} ${locked ? 'LOCKED' : 'UNLOCKED'}`);
+    return { locked };
+  }
+
+  /**
+   * Mobile-side pairing: nhập pairingCode + thông tin người được giám sát →
+   * tạo Device dưới ParentAccount tương ứng. Phone optional (1 phụ huynh có
+   * thể pair nhiều thiết bị cùng số máy nếu cùng family plan).
+   */
+  async pair(dto: PairDeviceDto): Promise<PairDeviceResponseDto> {
+    const code = normalizePairingCode(dto.pairingCode);
+    const parent = await this.prisma.parent_accounts.findUnique({
+      where: { pairing_code: code },
+      select: { id: true },
+    });
+    if (!parent) {
+      throw new UnauthorizedException('Pairing code không hợp lệ');
+    }
+
+    const device = await this.prisma.devices.create({
+      data: {
+        parent_account_id: parent.id,
+        person_name: dto.personName.trim(),
+        person_type: dto.personType as PersonType,
+        phone_number: dto.phoneNumber?.trim() || null,
+        model: dto.device?.model?.trim() || null,
+        type: dto.device?.type?.trim() || null,
+        device_os: dto.device?.os?.trim() || null,
+      },
+      select: { id: true, person_name: true, person_type: true },
+    });
+
+    this.logger.log(
+      `Paired device=${device.id} (${device.person_type}) to parent=${parent.id}`,
+    );
+    return {
+      deviceId: device.id,
+      personName: device.person_name,
+      personType: device.person_type as PersonTypeDto,
+    };
+  }
+
+  async findAll(parentAccountId: string) {
     const devices = await this.prisma.devices.findMany({
-      include: { user: { select: { full_name: true, email: true } } },
+      where: { parent_account_id: parentAccountId },
       orderBy: { registered_at: 'desc' },
     });
 
@@ -126,7 +163,9 @@ export class DevicesService {
       const loc = locMap.get(d.id);
       return {
         id: d.id,
-        name: d.user?.full_name ?? d.phone_number,
+        name: d.person_name,
+        person_name: d.person_name,
+        person_type: d.person_type,
         phone_number: d.phone_number,
         model: d.model,
         device_os: d.device_os,
@@ -136,13 +175,16 @@ export class DevicesService {
         district: loc?.district ?? null,
         bts_id: btsMap.get(d.id) ?? null,
         last_seen: d.last_seen ?? loc?.recorded_at ?? null,
+        last_battery: d.last_battery,
         status: isOnline(d.last_seen) ? 'online' : 'offline',
+        is_locked: d.is_locked,
       };
     });
   }
 
   async getLocationHistory(
     deviceId: string,
+    parentAccountId: string,
     from?: string,
     to?: string,
     minDistanceMeters?: number,
@@ -150,9 +192,11 @@ export class DevicesService {
   ) {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      include: { user: { select: { full_name: true } } },
     });
     if (!device) throw new NotFoundException('Device not found');
+    if (device.parent_account_id !== parentAccountId) {
+      throw new ForbiddenException('Không có quyền với thiết bị này');
+    }
 
     const now = new Date();
     const fromDate = from
@@ -238,7 +282,9 @@ export class DevicesService {
     return {
       device: {
         id: device.id,
-        name: device.user?.full_name ?? device.phone_number,
+        name: device.person_name,
+        person_name: device.person_name,
+        person_type: device.person_type,
         phone_number: device.phone_number,
       },
       from: fromDate.toISOString(),
@@ -251,43 +297,33 @@ export class DevicesService {
     };
   }
 
-  async remove(id: string): Promise<void> {
-    const device = await this.prisma.devices.findUnique({
-      where: { id },
-      select: { id: true, user_id: true },
-    });
-    if (!device) throw new NotFoundException('Device not found');
+  async remove(id: string, parentAccountId: string): Promise<void> {
+    await this.assertOwnership(id, parentAccountId);
 
-    // Delete device inside a transaction and drop the owning user if this
-    // was their only registered device. location_history and
-    // cell_tower_history cascade via ON DELETE CASCADE.
-    await this.prisma.$transaction(async (tx) => {
-      await tx.devices.delete({ where: { id } });
-      const remaining = await tx.devices.count({
-        where: { user_id: device.user_id },
-      });
-      if (remaining === 0) {
-        await tx.users.delete({ where: { id: device.user_id } });
-      }
-    });
+    // location_history, cell_tower_history, sos_events, device_geofences,
+    // commands all cascade via ON DELETE CASCADE.
+    await this.prisma.devices.delete({ where: { id } });
 
     // Notify the mobile client (so it can wipe local state and return to
-    // the Register screen) and any dashboards listening for list refreshes.
+    // the Pairing screen) and any dashboards listening for list refreshes.
     this.events.emitDeviceDeleted({ deviceId: id });
 
-    this.logger.log(`Deleted device=${id}`);
+    this.logger.log(`Deleted device=${id} (parent=${parentAccountId})`);
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, parentAccountId: string) {
     const device = await this.prisma.devices.findUnique({
       where: { id },
       include: {
-        user: {
-          select: { full_name: true, email: true, address: true, citizen_id: true },
+        device_geofences: {
+          include: { geofence: true },
         },
       },
     });
     if (!device) throw new NotFoundException('Device not found');
+    if (device.parent_account_id !== parentAccountId) {
+      throw new ForbiddenException('Không có quyền với thiết bị này');
+    }
 
     const [location] = await this.prisma.$queryRaw<
       Array<{
@@ -351,20 +387,23 @@ export class DevicesService {
 
     return {
       id: device.id,
+      person_name: device.person_name,
+      person_type: device.person_type,
       phone_number: device.phone_number,
       model: device.model,
       device_os: device.device_os,
       type: device.type,
       registered_at: device.registered_at,
       status: isOnline(device.last_seen) ? 'online' : 'offline',
-      owner: device.user
-        ? {
-            full_name: device.user.full_name,
-            email: device.user.email,
-            address: device.user.address,
-            citizen_id: device.user.citizen_id,
-          }
-        : null,
+      last_battery: device.last_battery,
+      is_locked: device.is_locked,
+      geofences: device.device_geofences.map((dg) => ({
+        id: dg.geofence.id,
+        name: dg.geofence.name,
+        latitude: Number(dg.geofence.lat),
+        longitude: Number(dg.geofence.lon),
+        radius_m: dg.geofence.radius_m,
+      })),
       location: location
         ? {
             latitude: Number(location.latitude),
@@ -398,5 +437,19 @@ export class DevicesService {
           }
         : null,
     };
+  }
+
+  private async assertOwnership(
+    deviceId: string,
+    parentAccountId: string,
+  ): Promise<void> {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: { parent_account_id: true },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+    if (device.parent_account_id !== parentAccountId) {
+      throw new ForbiddenException('Không có quyền với thiết bị này');
+    }
   }
 }

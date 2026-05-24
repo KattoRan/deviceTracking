@@ -1,7 +1,12 @@
 import { apiClient } from "@/lib/api";
-import type { Admin, LoginInput, LoginResponse } from "@/types/admin";
+import type {
+  LoginInput,
+  LoginResponse,
+  ParentAccount,
+  RegisterInput,
+} from "@/types/admin";
 
-export const AUTH_TOKEN_KEY = "deviceTracking.adminToken";
+export const AUTH_TOKEN_KEY = "deviceTracking.parentToken";
 
 export const tokenStorage = {
   get(): string | null {
@@ -19,6 +24,14 @@ export const tokenStorage = {
 };
 
 export const authService = {
+  register: async (input: RegisterInput): Promise<LoginResponse> => {
+    const { data } = await apiClient.post<LoginResponse>(
+      "api/v1/auth/register",
+      input,
+    );
+    return data;
+  },
+
   login: async (input: LoginInput): Promise<LoginResponse> => {
     const { data } = await apiClient.post<LoginResponse>(
       "api/v1/auth/login",
@@ -27,8 +40,8 @@ export const authService = {
     return data;
   },
 
-  me: async (): Promise<Admin> => {
-    const { data } = await apiClient.get<Admin>("api/v1/auth/me");
+  me: async (): Promise<ParentAccount> => {
+    const { data } = await apiClient.get<ParentAccount>("api/v1/auth/me");
     return data;
   },
 };

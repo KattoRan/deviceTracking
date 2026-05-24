@@ -51,8 +51,8 @@ const DeviceInfoContext = createContext<DeviceInfoContextValue | null>(null);
 
 /**
  * Owns the single source of truth for registration state. Must wrap the app
- * so that App, RegisterScreen, and TrackingScreen all read/write the same
- * `registrationStatus` — without the shared store, RegisterScreen's
+ * so that App, PairScreen, and TrackingScreen all read/write the same
+ * `registrationStatus` — without the shared store, PairScreen's
  * `saveDeviceData` would only flip its local copy and the auth-state
  * navigator in App.tsx would never switch screens.
  */
@@ -80,8 +80,19 @@ export function DeviceInfoProvider({ children }: { children: ReactNode }) {
         const raw = await AsyncStorage.getItem(STORAGE_KEY_DEVICE);
         if (cancelled) return;
         if (raw) {
-          setStoredData(JSON.parse(raw) as StoredDeviceData);
-          setRegistrationStatus('registered');
+          const parsed = JSON.parse(raw) as Partial<StoredDeviceData> & {
+            // Legacy keys (pre-pairing flow). Discard silently — user re-pairs.
+            userId?: string;
+            fullName?: string;
+            email?: string;
+          };
+          if (parsed.deviceId && parsed.personName && parsed.personType) {
+            setStoredData(parsed as StoredDeviceData);
+            setRegistrationStatus('registered');
+          } else {
+            await AsyncStorage.removeItem(STORAGE_KEY_DEVICE);
+            setRegistrationStatus('not_registered');
+          }
         } else {
           setRegistrationStatus('not_registered');
         }

@@ -72,6 +72,8 @@ function TrackingPageInner() {
       status: "online",
       cellTowers: event.cellTowers,
       connectedBts: event.connectedBts,
+      spoofingSuspected: event.spoofingSuspected,
+      gpsBtsDistanceM: event.gpsBtsDistanceM,
     };
     setDevices((prev) =>
       prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
@@ -148,6 +150,18 @@ function TrackingPageInner() {
     }
   }, []);
 
+  const handleLockChange = useCallback(
+    (deviceId: string, locked: boolean) => {
+      setDevices((prev) =>
+        prev.map((d) => (d.id === deviceId ? { ...d, is_locked: locked } : d)),
+      );
+      setSelectedDevice((prev) =>
+        prev && prev.id === deviceId ? { ...prev, is_locked: locked } : prev,
+      );
+    },
+    [],
+  );
+
   const handleDeviceSelect = useCallback(
     (device: Device) => {
       setSelectedDevice(device);
@@ -217,6 +231,7 @@ function TrackingPageInner() {
               device={selectedDevice}
               onClose={() => setSelectedDevice(null)}
               isMobile={isMobile}
+              onLockChange={handleLockChange}
             />
           )}
         </AnimatePresence>
