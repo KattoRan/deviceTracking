@@ -355,15 +355,23 @@ export default function DeviceDetailPanel({
             <div className="space-y-2.5">
               <Row
                 icon={User}
-                label="Chủ sở hữu"
-                value={detail?.owner?.full_name || "--"}
+                label="Người dùng"
+                value={detail?.person_name || device.person_name || "--"}
+              />
+              <Row
+                icon={User}
+                label="Loại"
+                value={
+                  (detail?.person_type ?? device.person_type) === "CHILD"
+                    ? "👶 Trẻ em"
+                    : "👴 Người già"
+                }
               />
               <Row
                 icon={Phone}
                 label="Số điện thoại"
-                value={detail?.phone_number || device.phone_number}
+                value={detail?.phone_number || device.phone_number || "--"}
               />
-              <Row icon={Mail} label="Email" value={detail?.owner?.email || "--"} />
               <Row
                 icon={Smartphone}
                 label="Thiết bị"

@@ -1,4 +1,4 @@
-import { apiClient } from "@/lib/api";
+import { apiClient, AUTH_TOKEN_KEY } from "@/lib/api";
 import type {
   LoginInput,
   LoginResponse,
@@ -6,7 +6,7 @@ import type {
   RegisterInput,
 } from "@/types/admin";
 
-export const AUTH_TOKEN_KEY = "deviceTracking.parentToken";
+export { AUTH_TOKEN_KEY };
 
 export const tokenStorage = {
   get(): string | null {

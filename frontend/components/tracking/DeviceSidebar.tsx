@@ -61,7 +61,7 @@ export default function DeviceSidebar({
       if (!q) return true;
       return (
         d.name.toLowerCase().includes(q) ||
-        d.phone_number.toLowerCase().includes(q) ||
+        (d.phone_number?.toLowerCase().includes(q) ?? false) ||
         (d.model?.toLowerCase().includes(q) ?? false) ||
         (d.district?.toLowerCase().includes(q) ?? false)
       );

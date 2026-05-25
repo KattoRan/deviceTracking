@@ -75,9 +75,15 @@ export async function subscribeToPush(): Promise<{
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
+    // PushManager.subscribe expects BufferSource. TypeScript 5.7's stricter
+    // ArrayBuffer typing rejects Uint8Array<ArrayBufferLike> directly; copy
+    // into a fresh ArrayBuffer-backed Uint8Array to satisfy it.
+    const keyBytes = urlBase64ToUint8Array(key);
+    const buffer = new ArrayBuffer(keyBytes.byteLength);
+    new Uint8Array(buffer).set(keyBytes);
     sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(key),
+      applicationServerKey: buffer,
     });
   }
   await pushService.subscribe(sub);
