@@ -15,6 +15,11 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   displayName?: string;
+
+  @ApiProperty({ example: '0987654321', required: false })
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
 }
 
 export class LoginDto {
@@ -37,6 +42,9 @@ export class ParentAccountDto {
 
   @ApiProperty({ example: 'Gia đình họ Nguyễn', nullable: true })
   displayName: string | null;
+
+  @ApiProperty({ example: '0987654321', nullable: true })
+  phoneNumber: string | null;
 
   @ApiProperty({ example: 'K7M-9X2' })
   pairingCode: string;

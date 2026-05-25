@@ -62,10 +62,11 @@ export default function GeofenceBanner({
         <View style={styles.body}>
           <Text style={styles.title}>
             {isOutside
-              ? 'Bạn đang ở ngoài vùng giám sát'
+              ? 'Đang ở ngoài tất cả vùng giám sát'
               : 'Đã trở lại vùng giám sát'}
           </Text>
           <Text style={styles.subtitle}>
+            {isOutside ? 'Gần nhất: ' : ''}
             {geofenceName ?? 'Vùng'}
             {distanceM != null && radiusM != null
               ? ` · cách tâm ${distanceM}m / bán kính ${radiusM}m`
@@ -73,7 +74,7 @@ export default function GeofenceBanner({
           </Text>
           {isOutside && (
             <Text style={styles.hint}>
-              Cảnh báo sẽ tự tắt khi bạn quay lại vùng.
+              Cảnh báo sẽ tự tắt khi bạn quay lại bất kỳ vùng nào.
             </Text>
           )}
         </View>

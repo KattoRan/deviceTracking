@@ -9,6 +9,7 @@ import {
   Loader2,
   Lock,
   Mail,
+  Phone,
   Radio,
   Smartphone,
   User,
@@ -22,6 +23,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -36,6 +38,7 @@ export default function RegisterPage() {
         email: email.trim().toLowerCase(),
         password,
         displayName: displayName.trim() || undefined,
+        phoneNumber: phoneNumber.trim() || undefined,
       });
       setPairingCode(account.pairingCode);
     } catch (err: unknown) {
@@ -118,8 +121,8 @@ export default function RegisterPage() {
             <div className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-500" />
               <p>
-                Quay lại đây và vào{" "}
-                <span className="font-semibold">Dashboard</span> — thiết bị sẽ
+                Quay lại đây và mở{" "}
+                <span className="font-semibold">Giám sát</span> — thiết bị sẽ
                 xuất hiện ngay khi gửi vị trí đầu tiên.
               </p>
             </div>
@@ -127,10 +130,10 @@ export default function RegisterPage() {
 
           <button
             type="button"
-            onClick={() => router.replace("/dashboard")}
+            onClick={() => router.replace("/tracking")}
             className="mt-6 w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
           >
-            Vào Dashboard
+            Vào Giám sát
           </button>
         </div>
       </div>
@@ -196,7 +199,7 @@ export default function RegisterPage() {
 
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-slate-700">
-              Tên hiển thị <span className="text-slate-400">(tuỳ chọn)</span>
+              Tên phụ huynh <span className="text-slate-400">(tuỳ chọn)</span>
             </span>
             <div className="relative">
               <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -206,7 +209,27 @@ export default function RegisterPage() {
                 onChange={(e) => setDisplayName(e.target.value)}
                 disabled={submitting}
                 className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 placeholder-slate-400 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50"
-                placeholder="Gia đình họ Nguyễn"
+                placeholder="Nguyễn Văn A"
+              />
+            </div>
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-700">
+              Số điện thoại{" "}
+              <span className="text-slate-400">(để người thân liên hệ lại)</span>
+            </span>
+            <div className="relative">
+              <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                autoComplete="tel"
+                disabled={submitting}
+                inputMode="tel"
+                className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 placeholder-slate-400 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50"
+                placeholder="0987 654 321"
               />
             </div>
           </label>

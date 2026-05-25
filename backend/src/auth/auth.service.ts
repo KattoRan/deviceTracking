@@ -49,6 +49,7 @@ export class AuthService {
         email,
         password_hash: passwordHash,
         display_name: dto.displayName?.trim() || null,
+        phone_number: dto.phoneNumber?.trim() || null,
         pairing_code: pairingCode,
       },
     });
@@ -79,6 +80,7 @@ export class AuthService {
       id: account.id,
       email: account.email,
       displayName: account.display_name,
+      phoneNumber: account.phone_number,
       pairingCode: account.pairing_code,
     };
   }
@@ -87,6 +89,7 @@ export class AuthService {
     id: string;
     email: string;
     display_name: string | null;
+    phone_number: string | null;
     pairing_code: string;
   }): Promise<LoginResponseDto> {
     const payload: JwtPayload = { sub: account.id, email: account.email };
@@ -97,6 +100,7 @@ export class AuthService {
         id: account.id,
         email: account.email,
         displayName: account.display_name,
+        phoneNumber: account.phone_number,
         pairingCode: account.pairing_code,
       },
     };

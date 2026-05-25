@@ -43,12 +43,12 @@ export default function BreachDetailModal({
               <View style={styles.headerOutside}>
                 <Text style={styles.iconBig}>⚠️</Text>
                 <Text style={styles.titleOutside}>
-                  Đang ngoài vùng giám sát
+                  Đang ngoài tất cả vùng giám sát
                 </Text>
               </View>
 
               <View style={styles.zoneCard}>
-                <Text style={styles.zoneLabel}>Vùng</Text>
+                <Text style={styles.zoneLabel}>Vùng gần nhất</Text>
                 <Text style={styles.zoneName}>{activeBreach.geofenceName}</Text>
               </View>
 
@@ -79,8 +79,8 @@ export default function BreachDetailModal({
 
               <View style={styles.hintBox}>
                 <Text style={styles.hintText}>
-                  Cảnh báo sẽ tự tắt khi bạn quay lại vùng. Hệ thống nhắc lại
-                  bằng rung mỗi 30 giây.
+                  Cảnh báo sẽ tự tắt khi bạn quay lại bất kỳ vùng giám sát
+                  nào. Hệ thống nhắc lại bằng rung mỗi 30 giây.
                 </Text>
               </View>
             </ScrollView>
@@ -89,7 +89,7 @@ export default function BreachDetailModal({
               <Text style={styles.iconBig}>✅</Text>
               <Text style={styles.titleOk}>Không có cảnh báo</Text>
               <Text style={styles.emptyHint}>
-                Thiết bị đang trong vùng giám sát.
+                Thiết bị đang trong vùng giám sát an toàn.
               </Text>
             </View>
           )}

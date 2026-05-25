@@ -54,6 +54,30 @@ export class DevicesService {
     return this.geofenceState.getDeviceBreach(deviceId);
   }
 
+  /**
+   * Public (device-scoped, no JWT) lookup of the parent's contact info so the
+   * monitored device can show "Liên hệ phụ huynh" on its own screen. We only
+   * expose the bits the device actually needs — never the parent's email
+   * or pairing code.
+   */
+  async getParentContact(
+    deviceId: string,
+  ): Promise<{ displayName: string | null; phoneNumber: string | null }> {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: {
+        parent_account: {
+          select: { display_name: true, phone_number: true },
+        },
+      },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+    return {
+      displayName: device.parent_account.display_name,
+      phoneNumber: device.parent_account.phone_number,
+    };
+  }
+
   async getLockStatus(deviceId: string): Promise<{ locked: boolean }> {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },

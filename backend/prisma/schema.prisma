@@ -18,6 +18,7 @@ model parent_accounts {
   email         String   @unique
   password_hash String
   display_name  String?
+  phone_number  String?
   pairing_code  String   @unique
   created_at    DateTime @default(now())
   updated_at    DateTime @default(now()) @updatedAt

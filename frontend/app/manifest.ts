@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "deviceTracking - Phụ huynh",
     short_name: "deviceTracking",
     description: "Giám sát vị trí trẻ em và người già qua GPS + BTS",
-    start_url: "/dashboard",
+    start_url: "/tracking",
     scope: "/",
     display: "standalone",
     orientation: "portrait",

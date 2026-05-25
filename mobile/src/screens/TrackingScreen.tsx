@@ -6,6 +6,7 @@ import {
   Alert,
   AppState,
   type AppStateStatus,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,38 +18,37 @@ import { DEFAULT_TRACKING_INTERVAL_MS } from '../config/api';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { useLocation } from '../hooks/useLocation';
 import type {
-  CellTower,
   CommandDispatchEvent,
-  DeviceMovedEvent,
   IngestPayload,
   LocationData,
 } from '../models/types';
-import { fetchTrackingInterval, sendIngestData } from '../services/apiService';
+import {
+  fetchParentContact,
+  fetchTrackingInterval,
+  sendIngestData,
+} from '../services/apiService';
 import {
   isBackgroundLocationActive,
   startBackgroundLocation,
   stopBackgroundLocation,
 } from '../services/backgroundLocationService';
-import {
-  getCellTowerInfo,
-  isCellInfoUnavailable,
-  isUsingMockCellInfo,
-} from '../services/cellInfoService';
+import { getCellTowerInfo } from '../services/cellInfoService';
 import {
   connectMqtt,
   disconnectMqtt,
-  onMqttConnectionChange,
   publishTelemetry,
 } from '../services/mqttService';
 import {
   ackCommand,
   onCommand,
-  onDeviceMoved,
   onTrackingIntervalChanged,
   sendCommandResult,
 } from '../services/socketService';
 
-const MAX_EVENTS = 10;
+interface ParentContact {
+  displayName: string | null;
+  phoneNumber: string | null;
+}
 
 export default function TrackingScreen() {
   const { storedData } = useDeviceInfo();
@@ -56,7 +56,6 @@ export default function TrackingScreen() {
     location,
     error: locationError,
     hasPermission,
-    isWatching,
     requestPermission,
     startWatching,
     stopWatching,
@@ -64,16 +63,11 @@ export default function TrackingScreen() {
   } = useLocation();
 
   const [isActive, setIsActive] = useState(false);
-  const [cellTowers, setCellTowers] = useState<CellTower[]>([]);
-  const [lastSentAt, setLastSentAt] = useState<Date | null>(null);
-  const [sendCount, setSendCount] = useState(0);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [mqttConnected, setMqttConnected] = useState(false);
-  const [realtimeEvents, setRealtimeEvents] = useState<DeviceMovedEvent[]>([]);
   const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_TRACKING_INTERVAL_MS);
   const [bgActive, setBgActive] = useState(false);
   const [bgToggling, setBgToggling] = useState(false);
+  const [parentContact, setParentContact] = useState<ParentContact | null>(null);
+  const [contactLoading, setContactLoading] = useState(true);
   const [sosResult, setSosResult] = useState<{
     state: 'success' | 'error';
     message: string;
@@ -94,9 +88,11 @@ export default function TrackingScreen() {
   // and the OS produced no fix in the window). Resending the last known
   // fix keeps the device alive on the server without forcing a cold GPS read.
   const lastKnownRef = useRef<LocationData | null>(null);
+
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
+
   useEffect(() => {
     if (!location) return;
     // Dedup: refreshLocation() pushes into the buffer directly too, so the
@@ -104,95 +100,74 @@ export default function TrackingScreen() {
     const last = bufferRef.current[bufferRef.current.length - 1];
     if (!last || last.timestamp !== location.timestamp) {
       bufferRef.current.push(location);
-      console.log(
-        `[GPS] fix pushed → buffer=${bufferRef.current.length} acc=${location.accuracy?.toFixed(1) ?? '?'}m`,
-      );
     }
     lastKnownRef.current = location;
   }, [location]);
 
-  const fetchCellTowers = useCallback(async (): Promise<CellTower[]> => {
-    const towers = await getCellTowerInfo();
-    setCellTowers(towers);
-    return towers;
-  }, []);
+  const sendTelemetry = useCallback(
+    async (options: { forceFresh?: boolean } = {}) => {
+      if (!storedData?.deviceId) return null;
 
-  const sendTelemetry = useCallback(async (options: { forceFresh?: boolean } = {}) => {
-    if (!storedData?.deviceId) return null;
-    setSending(true);
-
-    try {
-      // Explicit triggers (start, resume, on-demand command) — and the very
-      // first tick before the watcher has produced anything — force a fresh
-      // one-shot fix. The buffer accumulates passively from the watcher.
-      if (options.forceFresh || lastKnownRef.current == null) {
-        const fresh = await refreshLocation();
-        if (fresh) {
-          const last = bufferRef.current[bufferRef.current.length - 1];
-          if (!last || last.timestamp !== fresh.timestamp) {
-            bufferRef.current.push(fresh);
+      try {
+        // Explicit triggers (start, resume, on-demand command) — and the very
+        // first tick before the watcher has produced anything — force a fresh
+        // one-shot fix. The buffer accumulates passively from the watcher.
+        if (options.forceFresh || lastKnownRef.current == null) {
+          const fresh = await refreshLocation();
+          if (fresh) {
+            const last = bufferRef.current[bufferRef.current.length - 1];
+            if (!last || last.timestamp !== fresh.timestamp) {
+              bufferRef.current.push(fresh);
+            }
+            lastKnownRef.current = fresh;
           }
-          lastKnownRef.current = fresh;
         }
-      }
 
-      // Atomically take everything the watcher pushed during this window.
-      const batch = bufferRef.current;
-      bufferRef.current = [];
+        // Atomically take everything the watcher pushed during this window.
+        const batch = bufferRef.current;
+        bufferRef.current = [];
 
-      // Heartbeat fallback — no fresh fix in this window, but we still want
-      // the server to see the device is alive.
-      const locations =
-        batch.length > 0
-          ? batch
-          : lastKnownRef.current
-            ? [lastKnownRef.current]
-            : [];
+        // Heartbeat fallback — no fresh fix in this window, but we still want
+        // the server to see the device is alive.
+        const locations =
+          batch.length > 0
+            ? batch
+            : lastKnownRef.current
+              ? [lastKnownRef.current]
+              : [];
 
-      if (locations.length === 0) {
-        setSendError('Không lấy được vị trí');
+        if (locations.length === 0) return null;
+
+        const towers = await getCellTowerInfo();
+        let batteryLevel: number | undefined;
+        try {
+          const lvl = await Battery.getBatteryLevelAsync();
+          batteryLevel = Math.round(lvl * 100);
+        } catch {
+          // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
+        }
+        const payload: IngestPayload = {
+          locations,
+          cellTowers: towers,
+          batteryLevel,
+        };
+
+        const sentOverMqtt = await publishTelemetry(storedData.deviceId, payload);
+        if (!sentOverMqtt) {
+          await sendIngestData(storedData.deviceId, payload);
+        }
+
+        return locations[locations.length - 1];
+      } catch {
+        // network / GPS errors are non-fatal — the next tick will retry
         return null;
       }
-
-      console.log(
-        `[GPS] flush → ${locations.length} fix(es) (fallback=${batch.length === 0})`,
-      );
-      const towers = await fetchCellTowers();
-      let batteryLevel: number | undefined;
-      try {
-        const lvl = await Battery.getBatteryLevelAsync();
-        batteryLevel = Math.round(lvl * 100);
-      } catch {
-        // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
-      }
-      const payload: IngestPayload = {
-        locations,
-        cellTowers: towers,
-        batteryLevel,
-      };
-
-      const sentOverMqtt = await publishTelemetry(storedData.deviceId, payload);
-      if (!sentOverMqtt) {
-        await sendIngestData(storedData.deviceId, payload);
-      }
-
-      setLastSentAt(new Date());
-      setSendCount((n) => n + 1);
-      setSendError(null);
-      return locations[locations.length - 1];
-    } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'Lỗi gửi dữ liệu');
-      return null;
-    } finally {
-      setSending(false);
-    }
-  }, [storedData, refreshLocation, fetchCellTowers]);
+    },
+    [storedData, refreshLocation],
+  );
 
   const startTracking = useCallback(async () => {
-    if (!storedData?.deviceId) {
-      Alert.alert('Chưa đăng ký', 'Vui lòng đăng ký thiết bị trước khi theo dõi.');
-      return false;
-    }
+    if (!storedData?.deviceId) return false;
 
     const granted = hasPermission || (await requestPermission());
     if (!granted) {
@@ -207,9 +182,8 @@ export default function TrackingScreen() {
     bufferRef.current = [];
     lastKnownRef.current = null;
     setIsActive(true);
-    setSendError(null);
 
-    // Fire once immediately so the user sees progress without waiting a cycle.
+    // Fire once immediately so the server sees a fresh fix without waiting.
     await sendTelemetry({ forceFresh: true });
     return true;
   }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry]);
@@ -283,6 +257,28 @@ export default function TrackingScreen() {
       cancelled = true;
     };
   }, []);
+
+  // Fetch parent contact info once we have a deviceId. Showing parent name
+  // and phone on this screen so the monitored person can always call back
+  // is the whole reason the field exists in parent_accounts.
+  useEffect(() => {
+    if (!storedData?.deviceId) return;
+    let cancelled = false;
+    setContactLoading(true);
+    fetchParentContact(storedData.deviceId)
+      .then((info) => {
+        if (!cancelled) setParentContact(info);
+      })
+      .catch(() => {
+        if (!cancelled) setParentContact(null);
+      })
+      .finally(() => {
+        if (!cancelled) setContactLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [storedData?.deviceId]);
 
   const toggleBackground = useCallback(async () => {
     if (bgToggling) return;
@@ -365,16 +361,13 @@ export default function TrackingScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!storedData?.deviceId) return;
-      const unsubscribe = onDeviceMoved((event) => {
-        if (event.deviceId !== storedData.deviceId) return;
-        setRealtimeEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS));
-      });
-      return unsubscribe;
-    }, [storedData]),
+      // Re-flush a fresh fix the moment the screen comes into focus so the
+      // parent's dashboard sees a recent point even after a background pause.
+      if (storedData?.deviceId && isActiveRef.current) {
+        void sendTelemetry({ forceFresh: true });
+      }
+    }, [storedData, sendTelemetry]),
   );
-
-  useEffect(() => onMqttConnectionChange(setMqttConnected), []);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
@@ -394,227 +387,132 @@ export default function TrackingScreen() {
     };
   }, []);
 
+  const handleCallParent = useCallback(() => {
+    if (!parentContact?.phoneNumber) return;
+    const tel = parentContact.phoneNumber.replace(/\s+/g, '');
+    Linking.openURL(`tel:${tel}`).catch(() => {
+      Alert.alert('Không gọi được', 'Thiết bị không hỗ trợ cuộc gọi.');
+    });
+  }, [parentContact?.phoneNumber]);
+
   return (
     <View style={{ flex: 1 }}>
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.card}>
-        <View style={styles.headerRow}>
-          <Text style={styles.cardTitle}>Trạng thái theo dõi</Text>
-          <View
-            style={[
-              styles.badge,
-              isActive
-                ? styles.badgeActive
-                : locationError
-                  ? styles.badgeError
-                  : styles.badgeIdle,
-            ]}
-          >
-            <Text
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+      >
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Thông tin liên lạc</Text>
+          {contactLoading ? (
+            <ActivityIndicator color="#1976D2" />
+          ) : (
+            <>
+              <ContactRow
+                label="Phụ huynh"
+                value={parentContact?.displayName || 'Chưa đặt tên'}
+              />
+              <ContactRow
+                label="Số điện thoại"
+                value={parentContact?.phoneNumber || 'Chưa có số'}
+              />
+              {parentContact?.phoneNumber ? (
+                <TouchableOpacity
+                  style={styles.callBtn}
+                  onPress={handleCallParent}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.callBtnText}>Gọi phụ huynh</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.placeholder}>
+                  Nhờ phụ huynh cập nhật số điện thoại tại trang tài khoản.
+                </Text>
+              )}
+            </>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.headerRow}>
+            <Text style={styles.cardTitle}>Theo dõi nền</Text>
+            <View
               style={[
-                styles.badgeText,
-                isActive
-                  ? styles.badgeTextActive
-                  : locationError
-                    ? styles.badgeTextError
-                    : styles.badgeTextIdle,
+                styles.badge,
+                bgActive ? styles.badgeActive : styles.badgeIdle,
               ]}
             >
-              {isActive ? 'Đang theo dõi' : locationError ? 'Lỗi' : 'Tạm dừng'}
-            </Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.toggleBtn, isActive ? styles.stopBtn : styles.startBtn]}
-          onPress={isActive ? stopTracking : () => void startTracking()}
-          activeOpacity={0.7}
-          disabled={sending && !isActive}
-        >
-          {sending && !isActive ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.toggleText}>
-              {isActive ? 'Dừng theo dõi' : 'Bắt đầu theo dõi'}
-            </Text>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.statsRow}>
-          <Stat label="Lần gửi" value={String(sendCount)} />
-          <Stat
-            label="Gửi cuối"
-            value={lastSentAt ? lastSentAt.toLocaleTimeString('vi-VN') : '--'}
-          />
-          <Stat label="Chu kỳ" value={`${Math.round(intervalMs / 1000)}s`} />
-          <Stat label="MQTT" value={mqttConnected ? 'ON' : 'OFF'} />
-          <Stat label="GPS" value={isWatching ? 'ON' : 'OFF'} />
-        </View>
-
-        {(sendError || locationError) && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{sendError || locationError}</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Vị trí GPS</Text>
-        {location ? (
-          <>
-            <Coord label="Latitude" value={location.latitude.toFixed(6)} />
-            <Coord label="Longitude" value={location.longitude.toFixed(6)} />
-          </>
-        ) : (
-          <Text style={styles.placeholder}>
-            Chưa có dữ liệu vị trí. Bật theo dõi để bắt đầu.
-          </Text>
-        )}
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Trạm BTS ({cellTowers.length})</Text>
-      </View>
-      {isUsingMockCellInfo() && cellTowers.length > 0 && (
-        <Text style={styles.mockNotice}>
-          Đang chạy trên Expo Go — dùng dữ liệu BTS mẫu. Chạy `expo prebuild` +
-          `expo run:android` để đọc dữ liệu thật.
-        </Text>
-      )}
-      {isCellInfoUnavailable() && (
-        <Text style={styles.mockNotice}>
-          Native module `cell-info` chưa được link. Kiểm tra autolinking
-          (package.json → expo.autolinking.nativeModulesDir) rồi chạy lại
-          `expo prebuild --clean` + `expo run:android`.
-        </Text>
-      )}
-      {cellTowers.length > 0 ? (
-        cellTowers.map((tower, idx) => (
-          <CellTowerRow key={`${tower.cid}-${idx}`} tower={tower} />
-        ))
-      ) : (
-        <View style={styles.card}>
-          <Text style={styles.placeholder}>Chưa phát hiện trạm BTS nào.</Text>
-        </View>
-      )}
-
-      <View style={styles.card}>
-        <View style={styles.headerRow}>
-          <Text style={styles.cardTitle}>Theo dõi nền</Text>
-          <View
-            style={[
-              styles.badge,
-              bgActive ? styles.badgeActive : styles.badgeIdle,
-            ]}
-          >
-            <Text
-              style={[
-                styles.badgeText,
-                bgActive ? styles.badgeTextActive : styles.badgeTextIdle,
-              ]}
-            >
-              {bgActive ? 'Đang chạy' : 'Tắt'}
-            </Text>
-          </View>
-        </View>
-        <Text style={styles.placeholder}>
-          Khi bật, ứng dụng tiếp tục gửi vị trí ngay cả khi đóng app. Cần cấp
-          quyền "Luôn cho phép" truy cập vị trí.
-        </Text>
-        <TouchableOpacity
-          style={[
-            styles.toggleBtn,
-            bgActive ? styles.stopBtn : styles.startBtn,
-          ]}
-          onPress={toggleBackground}
-          activeOpacity={0.7}
-          disabled={bgToggling}
-        >
-          {bgToggling ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.toggleText}>
-              {bgActive ? 'Tắt theo dõi nền' : 'Bật theo dõi nền'}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {realtimeEvents.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sự kiện realtime</Text>
-          {realtimeEvents.map((event, idx) => (
-            <View key={`${event.timestamp}-${idx}`} style={styles.eventRow}>
-              <Text style={styles.eventTime}>
-                {new Date(event.timestamp).toLocaleTimeString('vi-VN')}
-              </Text>
-              <Text style={styles.eventInfo} numberOfLines={1}>
-                CID {event.cid ?? '--'} · {event.signalDbm ?? '--'} dBm
+              <Text
+                style={[
+                  styles.badgeText,
+                  bgActive ? styles.badgeTextActive : styles.badgeTextIdle,
+                ]}
+              >
+                {bgActive ? 'Đang chạy' : 'Tắt'}
               </Text>
             </View>
-          ))}
+          </View>
+          <Text style={styles.placeholder}>
+            Khi bật, ứng dụng tiếp tục gửi vị trí ngay cả khi đóng app. Cần cấp
+            quyền &quot;Luôn cho phép&quot; truy cập vị trí.
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.toggleBtn,
+              bgActive ? styles.stopBtn : styles.startBtn,
+            ]}
+            onPress={toggleBackground}
+            activeOpacity={0.7}
+            disabled={bgToggling}
+          >
+            {bgToggling ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.toggleText}>
+                {bgActive ? 'Tắt theo dõi nền' : 'Bật theo dõi nền'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {locationError && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{locationError}</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      <SosButton
+        deviceId={storedData?.deviceId ?? null}
+        lastKnown={
+          location
+            ? {
+                lat: location.latitude,
+                lon: location.longitude,
+                accuracy: location.accuracy,
+              }
+            : null
+        }
+        onResult={(state, message) => setSosResult({ state, message })}
+      />
+      {sosResult && (
+        <View
+          style={[
+            stylesSos.toast,
+            sosResult.state === 'success' ? stylesSos.toastOk : stylesSos.toastErr,
+          ]}
+        >
+          <Text style={stylesSos.toastText}>{sosResult.message}</Text>
         </View>
       )}
-    </ScrollView>
-    <SosButton
-      deviceId={storedData?.deviceId ?? null}
-      lastKnown={
-        location
-          ? {
-              lat: location.latitude,
-              lon: location.longitude,
-              accuracy: location.accuracy,
-            }
-          : null
-      }
-      onResult={(state, message) => setSosResult({ state, message })}
-    />
-    {sosResult && (
-      <View
-        style={[
-          stylesSos.toast,
-          sosResult.state === 'success' ? stylesSos.toastOk : stylesSos.toastErr,
-        ]}
-      >
-        <Text style={stylesSos.toastText}>{sosResult.message}</Text>
-      </View>
-    )}
     </View>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function ContactRow({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function Coord({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.coordRow}>
-      <Text style={styles.coordLabel}>{label}</Text>
-      <Text style={styles.coordValue}>{value}</Text>
-    </View>
-  );
-}
-
-function CellTowerRow({ tower }: { tower: CellTower }) {
-  return (
-    <View style={styles.towerCard}>
-      <View style={styles.towerHeader}>
-        <Text style={styles.towerType}>{tower.type}</Text>
-        <Text style={styles.towerSignal}>{tower.signalDbm} dBm</Text>
-      </View>
-      <View style={styles.towerMeta}>
-        <Text style={styles.towerMetaItem}>CID {tower.cid}</Text>
-        <Text style={styles.towerMetaItem}>LAC {tower.lac}</Text>
-        <Text style={styles.towerMetaItem}>MCC {tower.mcc}</Text>
-        <Text style={styles.towerMetaItem}>MNC {tower.mnc}</Text>
-        {tower.pci != null && <Text style={styles.towerMetaItem}>PCI {tower.pci}</Text>}
-      </View>
+    <View style={styles.contactRow}>
+      <Text style={styles.contactLabel}>{label}</Text>
+      <Text style={styles.contactValue}>{value}</Text>
     </View>
   );
 }
@@ -638,36 +536,51 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   badgeActive: { backgroundColor: '#E7F5EC' },
   badgeIdle: { backgroundColor: '#EEE' },
-  badgeError: { backgroundColor: '#FDECEA' },
   badgeText: { fontSize: 12, fontWeight: '600' },
   badgeTextActive: { color: '#2E7D32' },
   badgeTextIdle: { color: '#757575' },
-  badgeTextError: { color: '#C62828' },
   toggleBtn: {
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginBottom: 16,
+    marginTop: 12,
   },
   startBtn: { backgroundColor: '#4CAF50' },
   stopBtn: { backgroundColor: '#F44336' },
   toggleText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  stat: { alignItems: 'center', flex: 1 },
-  statValue: { fontSize: 16, fontWeight: '700', color: '#1976D2' },
-  statLabel: { fontSize: 11, color: '#999', marginTop: 2 },
+  contactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#EEE',
+  },
+  contactLabel: { fontSize: 14, color: '#666' },
+  contactValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'right',
+    maxWidth: '60%',
+  },
+  callBtn: {
+    backgroundColor: '#1976D2',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  callBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   errorBox: {
     backgroundColor: '#FFF5F5',
     borderRadius: 8,
     padding: 10,
-    marginTop: 12,
     borderLeftWidth: 3,
     borderLeftColor: '#F44336',
+    marginBottom: 16,
   },
   errorText: { color: '#D32F2F', fontSize: 13 },
-  coordRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  coordLabel: { fontSize: 14, color: '#666' },
-  coordValue: { fontSize: 15, fontWeight: '600', color: '#333', fontVariant: ['tabular-nums'] },
   placeholder: {
     color: '#999',
     fontSize: 14,
@@ -675,40 +588,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 8,
   },
-  sectionHeader: { marginBottom: 12, paddingHorizontal: 4 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#333' },
-  mockNotice: {
-    fontSize: 12,
-    color: '#8A6D3B',
-    backgroundColor: '#FCF3D7',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 12,
-  },
-  towerCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-  },
-  towerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  towerType: { fontSize: 13, fontWeight: '700', color: '#1976D2' },
-  towerSignal: { fontSize: 13, color: '#333' },
-  towerMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  towerMetaItem: { fontSize: 11, color: '#666' },
-  eventRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#EEE',
-  },
-  eventTime: { fontSize: 12, color: '#999', width: 80 },
-  eventInfo: { fontSize: 13, color: '#333', flex: 1 },
 });
 
 const stylesSos = StyleSheet.create({

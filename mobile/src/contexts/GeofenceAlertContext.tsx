@@ -31,6 +31,14 @@ const GeofenceAlertContext =
  * that wants to show breach UI) can read the same state without each
  * subscribing its own socket listener.
  *
+ * Semantics: the backend emits a single device-level breach event — the
+ * device is "outside" only when it has left ALL of its assigned zones,
+ * and the event's `geofenceName` / `distanceM` reference the nearest
+ * zone (i.e. the closest "safe area" the user could head back to). The
+ * mobile listener therefore vibrates at most once per transition, even
+ * if the device crosses multiple zone boundaries while still inside
+ * another.
+ *
  * Bootstraps from /devices/:id/active-breach so a relaunched app re-shows
  * the alert immediately rather than waiting for the next inside→outside
  * transition. Re-vibrates every 30s while outside so a pocketed phone keeps

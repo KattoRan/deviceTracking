@@ -89,6 +89,18 @@ export class DevicesController {
     return this.devicesService.getActiveBreach(id);
   }
 
+  @Get(':id/parent-contact')
+  @ApiOperation({
+    summary:
+      'Thông tin liên lạc của phụ huynh sở hữu thiết bị (tên + sđt). Dùng để hiển thị trên app mobile.',
+  })
+  @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
+  getParentContact(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<{ displayName: string | null; phoneNumber: string | null }> {
+    return this.devicesService.getParentContact(id);
+  }
+
   @Get(':id/lock-status')
   @ApiOperation({ summary: 'Trạng thái khóa của thiết bị (dùng cho mobile app)' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })

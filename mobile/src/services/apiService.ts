@@ -128,3 +128,18 @@ export function fetchActiveBreach(
     { method: 'GET' },
   );
 }
+
+/**
+ * Returns the contact info (name + phone) of the parent who owns this
+ * device. Mobile shows it on the tracking screen so the monitored person
+ * always has a way to call back. Device-scoped, no auth — the device id
+ * itself is the only secret.
+ */
+export function fetchParentContact(
+  deviceId: string,
+): Promise<{ displayName: string | null; phoneNumber: string | null }> {
+  return request<{ displayName: string | null; phoneNumber: string | null }>(
+    `api/v1/devices/${deviceId}/parent-contact`,
+    { method: 'GET' },
+  );
+}

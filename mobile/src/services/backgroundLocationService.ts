@@ -5,6 +5,7 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
+import { getCellTowerInfo } from './cellInfoService';
 
 export const BACKGROUND_LOCATION_TASK = 'background-location-task';
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
@@ -84,6 +85,17 @@ async function flushBufferIfNeeded(deviceId: string): Promise<void> {
     // ignore — battery API có thể không có ở simulator
   }
 
+  // Sample BTS info at flush time. The headless task runs without a React
+  // tree, but cellInfoService is a plain native bridge — it works the same
+  // here as in foreground. Failure to read returns []; we still ship the
+  // GPS fixes alone rather than hold them up.
+  let cellTowers: Awaited<ReturnType<typeof getCellTowerInfo>> = [];
+  try {
+    cellTowers = await getCellTowerInfo();
+  } catch {
+    // keep empty array — server tolerates missing cell info
+  }
+
   try {
     const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.INGEST}`, {
       method: 'POST',
@@ -93,7 +105,7 @@ async function flushBufferIfNeeded(deviceId: string): Promise<void> {
       },
       body: JSON.stringify({
         locations: toSend,
-        cellTowers: [],
+        cellTowers,
         batteryLevel,
       }),
     });

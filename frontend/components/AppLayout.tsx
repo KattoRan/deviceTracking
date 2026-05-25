@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   History,
-  LayoutDashboard,
   LogOut,
   MapPin,
   Menu,
@@ -32,7 +31,6 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { name: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { name: "Giám sát", icon: MapPin, href: "/tracking" },
   { name: "Lịch sử", icon: History, href: "/history" },
   { name: "Vùng giám sát", icon: Shield, href: "/geofences" },
@@ -120,10 +118,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
             <div className="flex shrink-0 items-center gap-2">
               <GeofenceBell />
-              <div className="hidden max-w-[180px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 xl:flex">
-                <UserCircle className="h-4 w-4 shrink-0 text-slate-500" />
-                <span className="truncate font-medium">{parentAccount.displayName ?? parentAccount.email}</span>
-              </div>
               <button
                 type="button"
                 onClick={handleLogout}
@@ -173,18 +167,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 </Link>
               );
             })}
-            <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <UserCircle className="h-4 w-4 text-slate-500" />
-                <span className="font-medium">{parentAccount.displayName ?? parentAccount.email}</span>
-              </div>
+            <div className="mt-3 flex border-t border-slate-200 pt-3">
               <button
                 type="button"
                 onClick={() => {
                   setMobileMenuOpen(false);
                   handleLogout();
                 }}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-red-50 hover:text-red-600"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-red-50 hover:text-red-600"
               >
                 <LogOut className="h-4 w-4" />
                 Đăng xuất
