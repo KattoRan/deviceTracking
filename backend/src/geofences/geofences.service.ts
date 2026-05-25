@@ -35,14 +35,6 @@ export interface GeofenceDetail extends GeofenceListItem {
   }>;
 }
 
-interface ZoneGeometry {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  radius_m: number;
-}
-
 function haversineMeters(
   lat1: number,
   lon1: number,
@@ -143,24 +135,11 @@ export class GeofencesService {
     await this.prisma.geofences.update({ where: { id }, data });
 
     if (geometryChanged && existing.device_geofences.length > 0) {
-      const updated = await this.prisma.geofences.findUnique({
-        where: { id },
-        select: { id: true, name: true, lat: true, lon: true, radius_m: true },
-      });
-      if (updated) {
-        const zone: ZoneGeometry = {
-          id: updated.id,
-          name: updated.name,
-          lat: Number(updated.lat),
-          lon: Number(updated.lon),
-          radius_m: updated.radius_m,
-        };
-        await Promise.all(
-          existing.device_geofences.map((dg) =>
-            this.reEvaluateDevice(dg.device_id, zone),
-          ),
-        );
-      }
+      await Promise.all(
+        existing.device_geofences.map((dg) =>
+          this.reEvaluateDevice(dg.device_id),
+        ),
+      );
     }
 
     return this.toDetail(id, parentAccountId);
@@ -176,18 +155,23 @@ export class GeofencesService {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
 
-    if (existing.device_geofences.length > 0) {
+    const affectedDevices = existing.device_geofences.map(
+      (dg) => dg.device_id,
+    );
+
+    await this.prisma.geofences.delete({ where: { id } });
+
+    // After deleting the zone, the device's breach state may change: maybe
+    // the zone we just deleted was the only one keeping it "outside", or
+    // the only one keeping it "inside". Re-evaluate against remaining zones.
+    if (affectedDevices.length > 0) {
       await Promise.all(
-        existing.device_geofences.map((dg) =>
-          this.emitReturnedAndClear(dg.device_id, id),
-        ),
+        affectedDevices.map((deviceId) => this.reEvaluateDevice(deviceId)),
       );
     }
 
-    await this.prisma.geofences.delete({ where: { id } });
-    await this.state.clearGeofence(id);
     this.logger.log(
-      `Deleted geofence ${id} (detached ${existing.device_geofences.length} devices)`,
+      `Deleted geofence ${id} (detached ${affectedDevices.length} devices)`,
     );
   }
 
@@ -199,21 +183,19 @@ export class GeofencesService {
     const [zone, device, existing] = await Promise.all([
       this.prisma.geofences.findUnique({
         where: { id: geofenceId },
-        select: {
-          id: true,
-          name: true,
-          lat: true,
-          lon: true,
-          radius_m: true,
-          parent_account_id: true,
-        },
+        select: { id: true, parent_account_id: true },
       }),
       this.prisma.devices.findUnique({
         where: { id: deviceId },
         select: { id: true, parent_account_id: true },
       }),
       this.prisma.device_geofences.findUnique({
-        where: { device_id_geofence_id: { device_id: deviceId, geofence_id: geofenceId } },
+        where: {
+          device_id_geofence_id: {
+            device_id: deviceId,
+            geofence_id: geofenceId,
+          },
+        },
       }),
     ]);
     if (!zone) throw new NotFoundException('Geofence not found');
@@ -232,14 +214,7 @@ export class GeofencesService {
       data: { device_id: deviceId, geofence_id: geofenceId },
     });
 
-    await this.state.clearPair(deviceId, geofenceId);
-    await this.reEvaluateDevice(deviceId, {
-      id: zone.id,
-      name: zone.name,
-      lat: Number(zone.lat),
-      lon: Number(zone.lon),
-      radius_m: zone.radius_m,
-    });
+    await this.reEvaluateDevice(deviceId);
 
     return this.toDetail(geofenceId, parentAccountId);
   }
@@ -288,43 +263,40 @@ export class GeofencesService {
       ...(toAdd.length > 0
         ? [
             this.prisma.device_geofences.createMany({
-              data: toAdd.map((device_id) => ({ device_id, geofence_id: geofenceId })),
+              data: toAdd.map((device_id) => ({
+                device_id,
+                geofence_id: geofenceId,
+              })),
             }),
           ]
         : []),
     ]);
 
     await Promise.all(
-      toRemove.map((id) => this.emitReturnedAndClear(id, geofenceId)),
+      [...toAdd, ...toRemove].map((id) => this.reEvaluateDevice(id)),
     );
-
-    const zoneGeo: ZoneGeometry = {
-      id: zone.id,
-      name: zone.name,
-      lat: Number(zone.lat),
-      lon: Number(zone.lon),
-      radius_m: zone.radius_m,
-    };
-    await Promise.all(toAdd.map((id) => this.reEvaluateDevice(id, zoneGeo)));
 
     return this.toDetail(geofenceId, parentAccountId);
   }
 
-  async listActiveBreaches(parentAccountId: string): Promise<GeofenceBreachEvent[]> {
+  async listActiveBreaches(
+    parentAccountId: string,
+  ): Promise<GeofenceBreachEvent[]> {
     const all = await this.state.listActiveBreaches();
     if (all.length === 0) return [];
 
-    // Filter by parent ownership — Redis breach state isn't naturally scoped,
-    // so we lookup which geofences belong to this parent and intersect.
-    const ownedGeofenceIds = new Set(
+    // Breach state isn't naturally scoped — intersect with devices this
+    // parent owns (the device list is small per parent, so the lookup is
+    // cheap and avoids leaking other parents' alerts).
+    const ownedDeviceIds = new Set(
       (
-        await this.prisma.geofences.findMany({
+        await this.prisma.devices.findMany({
           where: { parent_account_id: parentAccountId },
           select: { id: true },
         })
-      ).map((g) => g.id),
+      ).map((d) => d.id),
     );
-    return all.filter((b) => ownedGeofenceIds.has(b.geofenceId));
+    return all.filter((b) => ownedDeviceIds.has(b.deviceId));
   }
 
   async detachDevice(
@@ -338,7 +310,12 @@ export class GeofencesService {
         select: { parent_account_id: true },
       }),
       this.prisma.device_geofences.findUnique({
-        where: { device_id_geofence_id: { device_id: deviceId, geofence_id: geofenceId } },
+        where: {
+          device_id_geofence_id: {
+            device_id: deviceId,
+            geofence_id: geofenceId,
+          },
+        },
       }),
     ]);
     if (!zone) throw new NotFoundException('Geofence not found');
@@ -348,17 +325,66 @@ export class GeofencesService {
     if (!link) throw new NotFoundException('Thiết bị không thuộc vùng này');
 
     await this.prisma.device_geofences.delete({
-      where: { device_id_geofence_id: { device_id: deviceId, geofence_id: geofenceId } },
+      where: {
+        device_id_geofence_id: {
+          device_id: deviceId,
+          geofence_id: geofenceId,
+        },
+      },
     });
-    await this.emitReturnedAndClear(deviceId, geofenceId);
+    await this.reEvaluateDevice(deviceId);
 
     return this.toDetail(geofenceId, parentAccountId);
   }
 
-  private async reEvaluateDevice(
-    deviceId: string,
-    zone: ZoneGeometry,
-  ): Promise<void> {
+  /**
+   * Recompute the device's breach state against its current set of zones
+   * and the most recent GPS fix. Emits a socket event only when the
+   * status actually changes (avoid spamming inside→inside no-op events).
+   */
+  private async reEvaluateDevice(deviceId: string): Promise<void> {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: {
+        person_name: true,
+        device_geofences: {
+          include: {
+            geofence: {
+              select: {
+                id: true,
+                name: true,
+                lat: true,
+                lon: true,
+                radius_m: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!device) return;
+
+    const zones = device.device_geofences.map((dg) => dg.geofence);
+    const previous = await this.state.getDeviceStatus(deviceId);
+
+    // No zones left → no breach possible. Clear and notify if we were
+    // previously broadcasting an "outside" status.
+    if (zones.length === 0) {
+      const wasOutside = previous === 'outside';
+      const prevBreach = wasOutside
+        ? await this.state.getDeviceBreach(deviceId)
+        : null;
+      await this.state.clearDevice(deviceId);
+      if (prevBreach) {
+        this.eventsGateway.emitGeofenceBreach({
+          ...prevBreach,
+          status: 'returned',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
     const rows = await this.prisma.$queryRaw<
       Array<{ latitude: string; longitude: string }>
     >`
@@ -372,64 +398,66 @@ export class GeofencesService {
 
     const lat = Number(rows[0].latitude);
     const lon = Number(rows[0].longitude);
-    const distanceM = haversineMeters(lat, lon, zone.lat, zone.lon);
-    const current = distanceM > zone.radius_m ? 'outside' : 'inside';
-    const previous = await this.state.get(deviceId, zone.id);
 
-    await this.state.set(deviceId, zone.id, current);
+    let nearest: {
+      id: string;
+      name: string;
+      centerLat: number;
+      centerLon: number;
+      radiusM: number;
+      distanceM: number;
+    } | null = null;
+    let anyInside = false;
 
-    const device = await this.prisma.devices.findUnique({
-      where: { id: deviceId },
-      select: { person_name: true },
-    });
-    const deviceName = device?.person_name ?? null;
+    for (const z of zones) {
+      const centerLat = Number(z.lat);
+      const centerLon = Number(z.lon);
+      const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
+      if (distanceM <= z.radius_m) anyInside = true;
+      if (nearest === null || distanceM < nearest.distanceM) {
+        nearest = {
+          id: z.id,
+          name: z.name,
+          centerLat,
+          centerLon,
+          radiusM: z.radius_m,
+          distanceM,
+        };
+      }
+    }
+    if (!nearest) return;
+
+    const current: 'inside' | 'outside' = anyInside ? 'inside' : 'outside';
+    await this.state.setDeviceStatus(deviceId, current);
 
     const event: GeofenceBreachEvent = {
       deviceId,
-      deviceName,
-      geofenceId: zone.id,
-      geofenceName: zone.name,
+      deviceName: device.person_name ?? null,
+      geofenceId: nearest.id,
+      geofenceName: nearest.name,
       status: current === 'outside' ? 'outside' : 'returned',
       lat,
       lon,
-      centerLat: zone.lat,
-      centerLon: zone.lon,
-      radiusM: zone.radius_m,
-      distanceM: Math.round(distanceM),
+      centerLat: nearest.centerLat,
+      centerLon: nearest.centerLon,
+      radiusM: nearest.radiusM,
+      distanceM: Math.round(nearest.distanceM),
       timestamp: new Date().toISOString(),
     };
 
     if (current === 'outside') {
-      await this.state.setBreach(event);
+      await this.state.setDeviceBreach(event);
     } else {
-      await this.state.clearBreach(deviceId, zone.id);
+      await this.state.clearDeviceBreach(deviceId);
     }
 
     if (previous !== current) {
       this.eventsGateway.emitGeofenceBreach(event);
       this.logger.log(
-        `Re-eval after action: device=${deviceId} zone=${zone.id} ${previous ?? 'null'}→${current} ` +
-          `(dist=${Math.round(distanceM)}m, radius=${zone.radius_m}m)`,
+        `Re-eval after action: device=${deviceId} ${previous ?? 'null'}→${current} ` +
+          `nearest=${nearest.id} dist=${Math.round(nearest.distanceM)}m`,
       );
     }
-  }
-
-  private async emitReturnedAndClear(
-    deviceId: string,
-    geofenceId: string,
-  ): Promise<void> {
-    const breaches = await this.state.listActiveBreaches();
-    const match = breaches.find(
-      (b) => b.deviceId === deviceId && b.geofenceId === geofenceId,
-    );
-    if (match) {
-      this.eventsGateway.emitGeofenceBreach({
-        ...match,
-        status: 'returned',
-        timestamp: new Date().toISOString(),
-      });
-    }
-    await this.state.clearPair(deviceId, geofenceId);
   }
 
   private async toDetail(

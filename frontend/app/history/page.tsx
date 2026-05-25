@@ -255,7 +255,9 @@ function HistoryPageInner() {
                     }
                   >
                     {selectedDevice
-                      ? `${selectedDevice.name || selectedDevice.phone_number} — ${selectedDevice.phone_number}`
+                      ? selectedDevice.phone_number
+                        ? `${selectedDevice.name || selectedDevice.phone_number} — ${selectedDevice.phone_number}`
+                        : selectedDevice.name || selectedDevice.id.slice(0, 8)
                       : "Chọn thiết bị..."}
                   </span>
                   <ChevronDown className="h-4 w-4 text-slate-400" />
@@ -306,10 +308,12 @@ function HistoryPageInner() {
                             />
                             <div className="min-w-0">
                               <div className="truncate font-medium">
-                                {d.name || d.phone_number}
+                                {d.name || d.phone_number || d.id.slice(0, 8)}
                               </div>
                               <div className="truncate text-xs text-slate-500">
-                                {d.phone_number} · {d.model || "Unknown"}
+                                {[d.phone_number, d.model || "Unknown"]
+                                  .filter(Boolean)
+                                  .join(" · ")}
                               </div>
                             </div>
                           </button>

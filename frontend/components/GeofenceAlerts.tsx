@@ -17,10 +17,12 @@ import {
   Bell,
   CheckCircle2,
   MapPin,
+  Siren,
   X,
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 import geofenceService from "@/services/geofenceService";
+import { sosService, type SosEvent } from "@/services/sosService";
 import { cn } from "@/lib/utils";
 import type { GeofenceBreachEvent } from "@/types/geofence";
 
@@ -31,38 +33,98 @@ interface ReturnedToast extends GeofenceBreachEvent {
   uid: string;
 }
 
-interface GeofenceAlertsContextValue {
-  active: GeofenceBreachEvent[];
-  returned: ReturnedToast[];
-  dismissReturned: (uid: string) => void;
+interface SosAlertSocketEvent {
+  sosEventId: string;
+  deviceId: string;
+  deviceName: string | null;
+  lat: number;
+  lon: number;
+  accuracy: number | null;
+  batteryLevel: number | null;
+  triggeredAt: string;
 }
 
-const GeofenceAlertsContext =
-  createContext<GeofenceAlertsContextValue | null>(null);
+interface SosAlertItem {
+  sosEventId: string;
+  deviceId: string;
+  deviceName: string | null;
+  lat: number;
+  lon: number;
+  batteryLevel: number | null;
+  triggeredAt: string;
+}
+
+type MonitoringAlert =
+  | {
+      kind: "outside";
+      key: string;
+      timestamp: string;
+      event: GeofenceBreachEvent;
+    }
+  | {
+      kind: "sos";
+      key: string;
+      timestamp: string;
+      sos: SosAlertItem;
+    };
+
+interface MonitoringAlertsContextValue {
+  outside: GeofenceBreachEvent[];
+  sos: SosAlertItem[];
+  alerts: MonitoringAlert[];
+  returned: ReturnedToast[];
+  dismissReturned: (uid: string) => void;
+  ackSos: (sosEventId: string) => Promise<void>;
+}
+
+const MonitoringAlertsContext =
+  createContext<MonitoringAlertsContextValue | null>(null);
 
 /**
- * Manages two lists, exposed to consumer components via context:
+ * Bundles every "needs attention" event for the bell:
  *
- *   - `active` — devices currently outside their zone. Bootstrapped from
- *     /breaches/active so any page load reflects the current truth, kept up
- *     to date by socket events. Persistent until the device returns.
+ *   - `outside` — devices currently outside their safe area. Bootstrapped
+ *     from /breaches/active so any page load reflects the current truth,
+ *     kept up to date by `geofence_breach` socket events. One row per
+ *     device (the backend already collapses multi-zone state into a single
+ *     device-level breach).
  *
- *   - `returned` — short-lived confirmations that auto-dismiss; useful for
- *     acknowledging that a violation resolved without leaving a banner.
+ *   - `sos` — unacknowledged SOS events. Bootstrapped from /api/v1/sos
+ *     (filtered to unacked), kept up to date by `sos_alert` socket events
+ *     and the local `ackSos()` action.
  *
- * Rendering is split: <GeofenceBell> shows the active list as a notification
- * dropdown, <GeofenceReturnedToasts> shows the ephemeral confirmations.
- * Splitting keeps the bell free of layout concerns so it can be embedded
- * inside the nav OR positioned floating on /tracking.
+ *   - `returned` — short-lived confirmations that a device came back to a
+ *     zone. Auto-dismisses after ~6s.
+ *
+ * Rendering is split: <GeofenceBell> shows the combined live list as a
+ * dropdown; <GeofenceReturnedToasts> shows the ephemeral confirmations.
  */
 export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
   const [activeMap, setActiveMap] = useState<
     Map<string, GeofenceBreachEvent>
   >(() => new Map());
+  const [sosMap, setSosMap] = useState<Map<string, SosAlertItem>>(
+    () => new Map(),
+  );
   const [returned, setReturned] = useState<ReturnedToast[]>([]);
 
   const dismissReturned = useCallback((uid: string) => {
     setReturned((prev) => prev.filter((t) => t.uid !== uid));
+  }, []);
+
+  const ackSos = useCallback(async (sosEventId: string) => {
+    setSosMap((prev) => {
+      if (!prev.has(sosEventId)) return prev;
+      const next = new Map(prev);
+      next.delete(sosEventId);
+      return next;
+    });
+    try {
+      await sosService.acknowledge(sosEventId);
+    } catch {
+      // Non-fatal — server-side ack is for receipt tracking; the local list
+      // is already updated optimistically.
+    }
   }, []);
 
   useEffect(() => {
@@ -78,6 +140,18 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         // Non-fatal — socket events will still populate the list as they fire.
       });
+    sosService
+      .list(50)
+      .then((list) => {
+        if (cancelled) return;
+        const next = new Map<string, SosAlertItem>();
+        for (const e of list) {
+          if (e.acknowledgedAt) continue;
+          next.set(e.id, sosEventToItem(e));
+        }
+        setSosMap(next);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -112,13 +186,30 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    socket.on("sos_alert", (event: SosAlertSocketEvent) => {
+      setSosMap((prev) => {
+        const next = new Map(prev);
+        next.set(event.sosEventId, {
+          sosEventId: event.sosEventId,
+          deviceId: event.deviceId,
+          deviceName: event.deviceName,
+          lat: event.lat,
+          lon: event.lon,
+          batteryLevel: event.batteryLevel,
+          triggeredAt: event.triggeredAt,
+        });
+        return next;
+      });
+    });
+
     return () => {
       socket.off("geofence_breach");
+      socket.off("sos_alert");
       socket.disconnect();
     };
   }, [dismissReturned]);
 
-  const active = useMemo(
+  const outside = useMemo(
     () =>
       Array.from(activeMap.values()).sort(
         (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
@@ -126,20 +217,59 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
     [activeMap],
   );
 
-  const value = useMemo<GeofenceAlertsContextValue>(
-    () => ({ active, returned, dismissReturned }),
-    [active, returned, dismissReturned],
+  const sos = useMemo(
+    () =>
+      Array.from(sosMap.values()).sort(
+        (a, b) => Date.parse(b.triggeredAt) - Date.parse(a.triggeredAt),
+      ),
+    [sosMap],
+  );
+
+  const alerts = useMemo<MonitoringAlert[]>(() => {
+    const combined: MonitoringAlert[] = [
+      ...sos.map<MonitoringAlert>((s) => ({
+        kind: "sos",
+        key: `sos:${s.sosEventId}`,
+        timestamp: s.triggeredAt,
+        sos: s,
+      })),
+      ...outside.map<MonitoringAlert>((e) => ({
+        kind: "outside",
+        key: `outside:${e.deviceId}:${e.geofenceId}`,
+        timestamp: e.timestamp,
+        event: e,
+      })),
+    ];
+    combined.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+    return combined;
+  }, [outside, sos]);
+
+  const value = useMemo<MonitoringAlertsContextValue>(
+    () => ({ outside, sos, alerts, returned, dismissReturned, ackSos }),
+    [outside, sos, alerts, returned, dismissReturned, ackSos],
   );
 
   return (
-    <GeofenceAlertsContext.Provider value={value}>
+    <MonitoringAlertsContext.Provider value={value}>
       {children}
-    </GeofenceAlertsContext.Provider>
+    </MonitoringAlertsContext.Provider>
   );
 }
 
-export function useGeofenceAlerts(): GeofenceAlertsContextValue {
-  const ctx = useContext(GeofenceAlertsContext);
+function sosEventToItem(e: SosEvent): SosAlertItem {
+  return {
+    sosEventId: e.id,
+    deviceId: e.deviceId,
+    deviceName: e.personName,
+    lat: e.lat,
+    lon: e.lon,
+    batteryLevel: e.batteryLevel,
+    triggeredAt: e.triggeredAt,
+  };
+}
+
+export function useGeofenceAlerts(): MonitoringAlertsContextValue {
+  const ctx = useContext(MonitoringAlertsContext);
   if (!ctx) {
     throw new Error(
       "GeofenceBell / GeofenceReturnedToasts must be inside <GeofenceAlertsProvider>",
@@ -150,7 +280,7 @@ export function useGeofenceAlerts(): GeofenceAlertsContextValue {
 
 export function GeofenceBell({ className }: { className?: string }) {
   const router = useRouter();
-  const { active } = useGeofenceAlerts();
+  const { alerts, ackSos } = useGeofenceAlerts();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -175,12 +305,22 @@ export function GeofenceBell({ className }: { className?: string }) {
     };
   }, [open]);
 
-  const count = active.length;
+  const count = alerts.length;
   const hasAlert = count > 0;
+  const sosCount = alerts.filter((a) => a.kind === "sos").length;
+  const outsideCount = count - sosCount;
 
-  function handleSelect(deviceId: string) {
+  function handleSelectOutside(deviceId: string) {
     setOpen(false);
     router.push(`/tracking?focus=${encodeURIComponent(deviceId)}`);
+  }
+
+  function handleSelectSos(item: SosAlertItem) {
+    setOpen(false);
+    router.push(
+      `/tracking?focus=${encodeURIComponent(item.deviceId)}&sos=${encodeURIComponent(item.sosEventId)}`,
+    );
+    void ackSos(item.sosEventId);
   }
 
   return (
@@ -190,14 +330,12 @@ export function GeofenceBell({ className }: { className?: string }) {
         onClick={() => setOpen((v) => !v)}
         aria-label={
           hasAlert
-            ? `Có ${count} thiết bị đang vi phạm vùng giám sát`
-            : "Cảnh báo vùng giám sát"
+            ? `Có ${count} cảnh báo giám sát`
+            : "Cảnh báo giám sát"
         }
         aria-expanded={open}
         title={
-          hasAlert
-            ? `${count} thiết bị đang vi phạm`
-            : "Không có cảnh báo"
+          hasAlert ? `${count} cảnh báo đang chờ xử lý` : "Không có cảnh báo"
         }
         className={cn(
           "relative flex h-9 w-9 items-center justify-center rounded-lg border transition-colors",
@@ -223,53 +361,96 @@ export function GeofenceBell({ className }: { className?: string }) {
         <div className="absolute right-0 top-full z-[1100] mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
           <header className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
             <div className="text-sm font-semibold text-slate-900">
-              Cảnh báo vùng giám sát
+              Cảnh báo giám sát
             </div>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                hasAlert
-                  ? "bg-red-100 text-red-700"
-                  : "bg-slate-100 text-slate-600",
+            <div className="flex items-center gap-1.5">
+              {sosCount > 0 && (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                  SOS {sosCount}
+                </span>
               )}
-            >
-              {count} đang vi phạm
-            </span>
+              {outsideCount > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                  Ra khỏi vùng {outsideCount}
+                </span>
+              )}
+              {count === 0 && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                  Bình thường
+                </span>
+              )}
+            </div>
           </header>
 
           <div className="max-h-[60vh] overflow-y-auto">
-            {active.length === 0 ? (
+            {alerts.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-slate-500">
                 <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-400" />
-                Tất cả thiết bị đang trong vùng giám sát.
+                Tất cả thiết bị đang an toàn.
               </div>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {active.map((t) => (
-                  <li key={t.deviceId}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect(t.deviceId)}
-                      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-red-50"
-                    >
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-slate-900">
-                          {t.deviceName ?? t.deviceId.slice(0, 8)}
+                {alerts.map((a) =>
+                  a.kind === "sos" ? (
+                    <li key={a.key}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSos(a.sos)}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-red-50"
+                      >
+                        <Siren className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                              SOS
+                            </span>
+                            <span className="truncate text-sm font-medium text-slate-900">
+                              {a.sos.deviceName ?? a.sos.deviceId.slice(0, 8)}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-slate-600">
+                            Cảnh báo SOS từ người được giám sát
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">
+                            {a.sos.batteryLevel != null && `Pin ${a.sos.batteryLevel}% · `}
+                            {new Date(a.sos.triggeredAt).toLocaleTimeString("vi-VN")}
+                          </div>
                         </div>
-                        <div className="truncate text-xs text-slate-600">
-                          Vùng{" "}
-                          <span className="font-medium">{t.geofenceName}</span>
+                        <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                      </button>
+                    </li>
+                  ) : (
+                    <li key={a.key}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectOutside(a.event.deviceId)}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50"
+                      >
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                              Ra khỏi vùng
+                            </span>
+                            <span className="truncate text-sm font-medium text-slate-900">
+                              {a.event.deviceName ?? a.event.deviceId.slice(0, 8)}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-slate-600">
+                            Vùng gần nhất{" "}
+                            <span className="font-medium">{a.event.geofenceName}</span>
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">
+                            Cách tâm {a.event.distanceM}m / bán kính{" "}
+                            {a.event.radiusM}m ·{" "}
+                            {new Date(a.event.timestamp).toLocaleTimeString("vi-VN")}
+                          </div>
                         </div>
-                        <div className="mt-0.5 text-[11px] text-slate-500">
-                          Cách tâm {t.distanceM}m / bán kính {t.radiusM}m ·{" "}
-                          {new Date(t.timestamp).toLocaleTimeString("vi-VN")}
-                        </div>
-                      </div>
-                      <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                    </button>
-                  </li>
-                ))}
+                        <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                      </button>
+                    </li>
+                  ),
+                )}
               </ul>
             )}
           </div>

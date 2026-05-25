@@ -85,18 +85,18 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <GeofenceAlertsProvider>
       <div className="min-h-screen bg-slate-50">
       <nav className="sticky top-0 z-[1050] border-b border-slate-200 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl px-4 md:px-8">
-          <div className="flex h-14 items-center justify-between">
-            <Link href="/" className="flex items-center gap-2.5">
+        <div className="mx-auto max-w-7xl px-4 md:px-6 lg:px-8">
+          <div className="flex h-14 items-center justify-between gap-3">
+            <Link href="/" className="flex shrink-0 items-center gap-2.5">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100">
                 <Radio className="h-4 w-4 text-emerald-600" />
               </div>
-              <span className="text-lg font-bold tracking-tight text-slate-900">
+              <span className="hidden text-lg font-bold tracking-tight text-slate-900 sm:inline">
                 deviceTracking
               </span>
             </Link>
 
-            <div className="hidden items-center gap-1 md:flex">
+            <div className="hidden flex-1 items-center justify-center gap-0.5 lg:flex">
               {NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href;
@@ -105,41 +105,41 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all",
+                      "flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium transition-all xl:gap-2 xl:px-3",
                       active
                         ? "bg-emerald-50 text-emerald-700"
                         : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                     )}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className="h-4 w-4 shrink-0" />
                     {item.name}
                   </Link>
                 );
               })}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <GeofenceBell />
-              <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 md:flex">
-                <UserCircle className="h-4 w-4 text-slate-500" />
-                <span className="font-medium">{parentAccount.displayName ?? parentAccount.email}</span>
+              <div className="hidden max-w-[180px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 xl:flex">
+                <UserCircle className="h-4 w-4 shrink-0 text-slate-500" />
+                <span className="truncate font-medium">{parentAccount.displayName ?? parentAccount.email}</span>
               </div>
               <button
                 type="button"
                 onClick={handleLogout}
                 aria-label="Đăng xuất"
                 title="Đăng xuất"
-                className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-red-50 hover:text-red-600 md:flex"
+                className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-red-50 hover:text-red-600 lg:flex"
               >
                 <LogOut className="h-4 w-4" />
-                Đăng xuất
+                <span className="hidden xl:inline">Đăng xuất</span>
               </button>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen((prev) => !prev)}
                 aria-label="Toggle menu"
                 aria-expanded={mobileMenuOpen}
-                className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
+                className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:hidden"
               >
                 {mobileMenuOpen ? (
                   <X className="h-5 w-5" />
@@ -152,7 +152,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         </div>
 
         {mobileMenuOpen && (
-          <div className="space-y-1 border-t border-slate-200 bg-white px-4 py-3 md:hidden">
+          <div className="space-y-1 border-t border-slate-200 bg-white px-4 py-3 lg:hidden">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href;

@@ -199,67 +199,97 @@ export class IngestService {
     // produces phantom "ra khỏi vùng" alerts. Also skip when GPS spoofing
     // is suspected.
     if (device.device_geofences.length > 0 && latestQuality === 'gps' && !spoofingSuspected) {
-      const deviceName = device.person_name;
-      for (const dg of device.device_geofences) {
-        void this.evaluateGeofence(
-          deviceId,
-          deviceName,
-          device.parent_account_id,
-          latest.latitude,
-          latest.longitude,
-          dg.geofence,
-          latestAt,
-        );
-      }
+      void this.evaluateDeviceZones(
+        deviceId,
+        device.person_name,
+        device.parent_account_id,
+        latest.latitude,
+        latest.longitude,
+        device.device_geofences.map((dg) => dg.geofence),
+        latestAt,
+      );
     }
 
     return { success: true, message: 'Data received' };
   }
 
-  private async evaluateGeofence(
+  /**
+   * Device-level breach evaluation: the device is "inside" while it sits
+   * within ANY of its assigned zones, and "outside" only when it leaves
+   * ALL of them. We pick the zone the device is closest to as the
+   * reference point in the emitted event so the UI has a concrete name
+   * and distance to show.
+   */
+  private async evaluateDeviceZones(
     deviceId: string,
     deviceName: string | null,
     parentAccountId: string,
     lat: number,
     lon: number,
-    geofence: {
+    geofences: Array<{
       id: string;
       name: string;
       lat: { toString(): string } | number;
       lon: { toString(): string } | number;
       radius_m: number;
-    },
+    }>,
     now: Date,
   ): Promise<void> {
+    if (geofences.length === 0) return;
     try {
-      const centerLat = Number(geofence.lat);
-      const centerLon = Number(geofence.lon);
-      const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
-      const current = distanceM > geofence.radius_m ? 'outside' : 'inside';
-      const previous = await this.geofenceState.get(deviceId, geofence.id);
-      await this.geofenceState.set(deviceId, geofence.id, current);
+      let nearest: {
+        id: string;
+        name: string;
+        centerLat: number;
+        centerLon: number;
+        radiusM: number;
+        distanceM: number;
+      } | null = null;
+      let anyInside = false;
+
+      for (const g of geofences) {
+        const centerLat = Number(g.lat);
+        const centerLon = Number(g.lon);
+        const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
+        if (distanceM <= g.radius_m) anyInside = true;
+        if (nearest === null || distanceM < nearest.distanceM) {
+          nearest = {
+            id: g.id,
+            name: g.name,
+            centerLat,
+            centerLon,
+            radiusM: g.radius_m,
+            distanceM,
+          };
+        }
+      }
+      if (!nearest) return;
+
+      const current = anyInside ? 'inside' : 'outside';
+      const previous = await this.geofenceState.getDeviceStatus(deviceId);
+      await this.geofenceState.setDeviceStatus(deviceId, current);
 
       const event = {
         deviceId,
         deviceName,
-        geofenceId: geofence.id,
-        geofenceName: geofence.name,
+        geofenceId: nearest.id,
+        geofenceName: nearest.name,
         status: (current === 'outside' ? 'outside' : 'returned') as
           | 'outside'
           | 'returned',
         lat,
         lon,
-        centerLat,
-        centerLon,
-        radiusM: geofence.radius_m,
-        distanceM: Math.round(distanceM),
+        centerLat: nearest.centerLat,
+        centerLon: nearest.centerLon,
+        radiusM: nearest.radiusM,
+        distanceM: Math.round(nearest.distanceM),
         timestamp: now.toISOString(),
       };
 
       if (current === 'outside') {
-        await this.geofenceState.setBreach(event);
+        await this.geofenceState.setDeviceBreach(event);
       } else {
-        await this.geofenceState.clearBreach(deviceId, geofence.id);
+        await this.geofenceState.clearDeviceBreach(deviceId);
       }
 
       const isTransition =
@@ -271,7 +301,8 @@ export class IngestService {
 
       this.logger.warn(
         `Geofence ${current === 'outside' ? 'BREACH' : 'RETURN'} ` +
-          `device=${deviceId} zone=${geofence.id} dist=${Math.round(distanceM)}m`,
+          `device=${deviceId} nearest=${nearest.id} ` +
+          `dist=${Math.round(nearest.distanceM)}m zones=${geofences.length}`,
       );
     } catch (err) {
       this.logger.error(

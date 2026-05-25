@@ -47,7 +47,7 @@ export default function DashboardPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { active: activeBreaches } = useGeofenceAlerts();
+  const { outside: activeBreaches } = useGeofenceAlerts();
 
   // Stay in sync with realtime device movement so KPIs and the mini-map
   // reflect the current state without a manual reload.
@@ -108,7 +108,7 @@ export default function DashboardPage() {
           Tổng quan
         </h1>
         <p className="text-sm text-slate-600">
-          Trạng thái thiết bị và vi phạm vùng giám sát theo thời gian thực.
+          Trạng thái thiết bị và cảnh báo giám sát theo thời gian thực.
         </p>
       </header>
 
@@ -132,7 +132,7 @@ export default function DashboardPage() {
           accent="bg-slate-100 text-slate-500"
         />
         <Kpi
-          label="Đang vi phạm"
+          label="Ra khỏi vùng"
           value={stats.breaches}
           icon={AlertTriangle}
           accent={
@@ -215,7 +215,7 @@ function Kpi({
 }
 
 function ActiveBreachesPanel() {
-  const { active } = useGeofenceAlerts();
+  const { outside: active } = useGeofenceAlerts();
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
