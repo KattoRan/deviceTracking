@@ -14,10 +14,12 @@ import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 import {
   AlertTriangle,
+  Battery,
   Bell,
   CheckCircle2,
   MapPin,
   Siren,
+  WifiOff,
   X,
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
@@ -54,6 +56,33 @@ interface SosAlertItem {
   triggeredAt: string;
 }
 
+interface LowBatterySocketEvent {
+  deviceId: string;
+  deviceName: string | null;
+  batteryLevel: number;
+  timestamp: string;
+}
+
+interface BatteryUpdateSocketEvent {
+  deviceId: string;
+  batteryLevel: number;
+  timestamp: string;
+}
+
+interface OfflineSocketEvent {
+  deviceId: string;
+  deviceName: string | null;
+  lastSeen: string | null;
+  timestamp: string;
+}
+
+interface DeviceMovedMinimalEvent {
+  deviceId: string;
+}
+
+// Hysteresis ngưỡng disarm phải khớp BE: ingest.service LOW_BATTERY_RESET_THRESHOLD=25.
+const LOW_BATTERY_CLEAR_AT = 25;
+
 type MonitoringAlert =
   | {
       kind: "outside";
@@ -66,15 +95,31 @@ type MonitoringAlert =
       key: string;
       timestamp: string;
       sos: SosAlertItem;
+    }
+  | {
+      kind: "lowBattery";
+      key: string;
+      timestamp: string;
+      item: LowBatterySocketEvent;
+    }
+  | {
+      kind: "offline";
+      key: string;
+      timestamp: string;
+      item: OfflineSocketEvent;
     };
 
 interface MonitoringAlertsContextValue {
   outside: GeofenceBreachEvent[];
   sos: SosAlertItem[];
+  lowBattery: LowBatterySocketEvent[];
+  offline: OfflineSocketEvent[];
   alerts: MonitoringAlert[];
   returned: ReturnedToast[];
   dismissReturned: (uid: string) => void;
   ackSos: (sosEventId: string) => Promise<void>;
+  dismissLowBattery: (deviceId: string) => void;
+  dismissOffline: (deviceId: string) => void;
 }
 
 const MonitoringAlertsContext =
@@ -106,10 +151,34 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
   const [sosMap, setSosMap] = useState<Map<string, SosAlertItem>>(
     () => new Map(),
   );
+  const [lowBatteryMap, setLowBatteryMap] = useState<
+    Map<string, LowBatterySocketEvent>
+  >(() => new Map());
+  const [offlineMap, setOfflineMap] = useState<Map<string, OfflineSocketEvent>>(
+    () => new Map(),
+  );
   const [returned, setReturned] = useState<ReturnedToast[]>([]);
 
   const dismissReturned = useCallback((uid: string) => {
     setReturned((prev) => prev.filter((t) => t.uid !== uid));
+  }, []);
+
+  const dismissLowBattery = useCallback((deviceId: string) => {
+    setLowBatteryMap((prev) => {
+      if (!prev.has(deviceId)) return prev;
+      const next = new Map(prev);
+      next.delete(deviceId);
+      return next;
+    });
+  }, []);
+
+  const dismissOffline = useCallback((deviceId: string) => {
+    setOfflineMap((prev) => {
+      if (!prev.has(deviceId)) return prev;
+      const next = new Map(prev);
+      next.delete(deviceId);
+      return next;
+    });
   }, []);
 
   const ackSos = useCallback(async (sosEventId: string) => {
@@ -202,9 +271,51 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       });
     });
 
+    socket.on("low_battery", (event: LowBatterySocketEvent) => {
+      setLowBatteryMap((prev) => {
+        const next = new Map(prev);
+        next.set(event.deviceId, event);
+        return next;
+      });
+    });
+
+    socket.on("device_offline", (event: OfflineSocketEvent) => {
+      setOfflineMap((prev) => {
+        const next = new Map(prev);
+        next.set(event.deviceId, event);
+        return next;
+      });
+    });
+
+    // Auto-clear: pin sạc lại ≥25 → BE silently flip flag, FE tự dọn cảnh báo
+    // tương ứng. Ngưỡng khớp với BE LOW_BATTERY_RESET_THRESHOLD.
+    socket.on("battery_update", (event: BatteryUpdateSocketEvent) => {
+      if (event.batteryLevel < LOW_BATTERY_CLEAR_AT) return;
+      setLowBatteryMap((prev) => {
+        if (!prev.has(event.deviceId)) return prev;
+        const next = new Map(prev);
+        next.delete(event.deviceId);
+        return next;
+      });
+    });
+
+    // Auto-clear: device online lại → ingest gửi `device_moved`, dọn offline.
+    socket.on("device_moved", (event: DeviceMovedMinimalEvent) => {
+      setOfflineMap((prev) => {
+        if (!prev.has(event.deviceId)) return prev;
+        const next = new Map(prev);
+        next.delete(event.deviceId);
+        return next;
+      });
+    });
+
     return () => {
       socket.off("geofence_breach");
       socket.off("sos_alert");
+      socket.off("low_battery");
+      socket.off("device_offline");
+      socket.off("battery_update");
+      socket.off("device_moved");
       socket.disconnect();
     };
   }, [dismissReturned]);
@@ -225,6 +336,22 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
     [sosMap],
   );
 
+  const lowBattery = useMemo(
+    () =>
+      Array.from(lowBatteryMap.values()).sort(
+        (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
+      ),
+    [lowBatteryMap],
+  );
+
+  const offline = useMemo(
+    () =>
+      Array.from(offlineMap.values()).sort(
+        (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
+      ),
+    [offlineMap],
+  );
+
   const alerts = useMemo<MonitoringAlert[]>(() => {
     const combined: MonitoringAlert[] = [
       ...sos.map<MonitoringAlert>((s) => ({
@@ -239,14 +366,48 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
         timestamp: e.timestamp,
         event: e,
       })),
+      ...lowBattery.map<MonitoringAlert>((e) => ({
+        kind: "lowBattery",
+        key: `lowBattery:${e.deviceId}`,
+        timestamp: e.timestamp,
+        item: e,
+      })),
+      ...offline.map<MonitoringAlert>((e) => ({
+        kind: "offline",
+        key: `offline:${e.deviceId}`,
+        timestamp: e.timestamp,
+        item: e,
+      })),
     ];
     combined.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
     return combined;
-  }, [outside, sos]);
+  }, [outside, sos, lowBattery, offline]);
 
   const value = useMemo<MonitoringAlertsContextValue>(
-    () => ({ outside, sos, alerts, returned, dismissReturned, ackSos }),
-    [outside, sos, alerts, returned, dismissReturned, ackSos],
+    () => ({
+      outside,
+      sos,
+      lowBattery,
+      offline,
+      alerts,
+      returned,
+      dismissReturned,
+      ackSos,
+      dismissLowBattery,
+      dismissOffline,
+    }),
+    [
+      outside,
+      sos,
+      lowBattery,
+      offline,
+      alerts,
+      returned,
+      dismissReturned,
+      ackSos,
+      dismissLowBattery,
+      dismissOffline,
+    ],
   );
 
   return (
@@ -280,7 +441,8 @@ export function useGeofenceAlerts(): MonitoringAlertsContextValue {
 
 export function GeofenceBell({ className }: { className?: string }) {
   const router = useRouter();
-  const { alerts, ackSos } = useGeofenceAlerts();
+  const { alerts, ackSos, dismissLowBattery, dismissOffline } =
+    useGeofenceAlerts();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -308,9 +470,11 @@ export function GeofenceBell({ className }: { className?: string }) {
   const count = alerts.length;
   const hasAlert = count > 0;
   const sosCount = alerts.filter((a) => a.kind === "sos").length;
-  const outsideCount = count - sosCount;
+  const outsideCount = alerts.filter((a) => a.kind === "outside").length;
+  const lowBatteryCount = alerts.filter((a) => a.kind === "lowBattery").length;
+  const offlineCount = alerts.filter((a) => a.kind === "offline").length;
 
-  function handleSelectOutside(deviceId: string) {
+  function focusDevice(deviceId: string) {
     setOpen(false);
     router.push(`/tracking?focus=${encodeURIComponent(deviceId)}`);
   }
@@ -374,6 +538,16 @@ export function GeofenceBell({ className }: { className?: string }) {
                   Ra khỏi vùng {outsideCount}
                 </span>
               )}
+              {lowBatteryCount > 0 && (
+                <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+                  Pin yếu {lowBatteryCount}
+                </span>
+              )}
+              {offlineCount > 0 && (
+                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                  Mất kết nối {offlineCount}
+                </span>
+              )}
               {count === 0 && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                   Bình thường
@@ -390,67 +564,172 @@ export function GeofenceBell({ className }: { className?: string }) {
               </div>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {alerts.map((a) =>
-                  a.kind === "sos" ? (
-                    <li key={a.key}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSos(a.sos)}
-                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-red-50"
+                {alerts.map((a) => {
+                  if (a.kind === "sos") {
+                    return (
+                      <li key={a.key}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSos(a.sos)}
+                          className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-red-50"
+                        >
+                          <Siren className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                                SOS
+                              </span>
+                              <span className="truncate text-sm font-medium text-slate-900">
+                                {a.sos.deviceName ?? a.sos.deviceId.slice(0, 8)}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 truncate text-xs text-slate-600">
+                              Cảnh báo SOS từ người được giám sát
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-500">
+                              {a.sos.batteryLevel != null &&
+                                `Pin ${a.sos.batteryLevel}% · `}
+                              {new Date(a.sos.triggeredAt).toLocaleTimeString(
+                                "vi-VN",
+                              )}
+                            </div>
+                          </div>
+                          <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        </button>
+                      </li>
+                    );
+                  }
+
+                  if (a.kind === "outside") {
+                    return (
+                      <li key={a.key}>
+                        <button
+                          type="button"
+                          onClick={() => focusDevice(a.event.deviceId)}
+                          className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50"
+                        >
+                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                                Ra khỏi vùng
+                              </span>
+                              <span className="truncate text-sm font-medium text-slate-900">
+                                {a.event.deviceName ??
+                                  a.event.deviceId.slice(0, 8)}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 truncate text-xs text-slate-600">
+                              Vùng gần nhất{" "}
+                              <span className="font-medium">
+                                {a.event.geofenceName}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-500">
+                              Cách tâm {a.event.distanceM}m / bán kính{" "}
+                              {a.event.radiusM}m ·{" "}
+                              {new Date(a.event.timestamp).toLocaleTimeString(
+                                "vi-VN",
+                              )}
+                            </div>
+                          </div>
+                          <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        </button>
+                      </li>
+                    );
+                  }
+
+                  if (a.kind === "lowBattery") {
+                    return (
+                      <li
+                        key={a.key}
+                        className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-orange-50"
                       >
-                        <Siren className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                        <Battery className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
                         <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => focusDevice(a.item.deviceId)}
+                            className="block w-full text-left"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                                Pin yếu
+                              </span>
+                              <span className="truncate text-sm font-medium text-slate-900">
+                                {a.item.deviceName ??
+                                  a.item.deviceId.slice(0, 8)}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-xs text-slate-600">
+                              Còn{" "}
+                              <span className="font-semibold text-orange-700">
+                                {a.item.batteryLevel}%
+                              </span>{" "}
+                              pin — hãy nhắc sạc.
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-500">
+                              {new Date(a.item.timestamp).toLocaleTimeString(
+                                "vi-VN",
+                              )}
+                            </div>
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => dismissLowBattery(a.item.deviceId)}
+                          aria-label="Bỏ qua"
+                          className="mt-0.5 text-slate-400 hover:text-slate-700"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    );
+                  }
+
+                  // a.kind === "offline"
+                  return (
+                    <li
+                      key={a.key}
+                      className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-100"
+                    >
+                      <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => focusDevice(a.item.deviceId)}
+                          className="block w-full text-left"
+                        >
                           <div className="flex items-center gap-1.5">
-                            <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                              SOS
+                            <span className="rounded bg-slate-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                              Mất kết nối
                             </span>
                             <span className="truncate text-sm font-medium text-slate-900">
-                              {a.sos.deviceName ?? a.sos.deviceId.slice(0, 8)}
+                              {a.item.deviceName ??
+                                a.item.deviceId.slice(0, 8)}
                             </span>
                           </div>
-                          <div className="mt-0.5 truncate text-xs text-slate-600">
-                            Cảnh báo SOS từ người được giám sát
+                          <div className="mt-0.5 text-xs text-slate-600">
+                            Không gửi tín hiệu hơn 15 phút.
                           </div>
                           <div className="mt-0.5 text-[11px] text-slate-500">
-                            {a.sos.batteryLevel != null && `Pin ${a.sos.batteryLevel}% · `}
-                            {new Date(a.sos.triggeredAt).toLocaleTimeString("vi-VN")}
+                            {a.item.lastSeen
+                              ? `Lần cuối ${new Date(a.item.lastSeen).toLocaleTimeString("vi-VN")}`
+                              : `Phát hiện ${new Date(a.item.timestamp).toLocaleTimeString("vi-VN")}`}
                           </div>
-                        </div>
-                        <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                      </button>
-                    </li>
-                  ) : (
-                    <li key={a.key}>
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => handleSelectOutside(a.event.deviceId)}
-                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50"
+                        onClick={() => dismissOffline(a.item.deviceId)}
+                        aria-label="Bỏ qua"
+                        className="mt-0.5 text-slate-400 hover:text-slate-700"
                       >
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                              Ra khỏi vùng
-                            </span>
-                            <span className="truncate text-sm font-medium text-slate-900">
-                              {a.event.deviceName ?? a.event.deviceId.slice(0, 8)}
-                            </span>
-                          </div>
-                          <div className="mt-0.5 truncate text-xs text-slate-600">
-                            Vùng gần nhất{" "}
-                            <span className="font-medium">{a.event.geofenceName}</span>
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-slate-500">
-                            Cách tâm {a.event.distanceM}m / bán kính{" "}
-                            {a.event.radiusM}m ·{" "}
-                            {new Date(a.event.timestamp).toLocaleTimeString("vi-VN")}
-                          </div>
-                        </div>
-                        <MapPin className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </li>
-                  ),
-                )}
+                  );
+                })}
               </ul>
             )}
           </div>
