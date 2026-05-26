@@ -154,6 +154,85 @@ export class CommandsService {
     };
   }
 
+  /**
+   * HTTP polling endpoint cho mobile background — khi app ở background, JS
+   * runtime bị suspend nên socket disconnect, không nhận được command. Mỗi
+   * lần TaskManager headless wake để flush GPS, mobile gọi endpoint này để
+   * lấy các command còn pending, ack ngay (mark delivered) trong cùng 1
+   * round-trip để giảm RTT. Result vẫn POST riêng sau khi mobile execute
+   * xong.
+   *
+   * Trade-off: nếu trẻ đứng yên >5p (cron timeout) thì command bị mark
+   * failed trước khi background poll tới. Chấp nhận được vì foreground vẫn
+   * realtime qua socket, và GPS thường có chuyển động nhỏ giữ poll chạy.
+   */
+  async pollPending(deviceId: string) {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: { id: true },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+
+    const candidates = await this.prisma.device_commands.findMany({
+      where: { device_id: deviceId, status: 'pending' },
+      orderBy: { created_at: 'asc' },
+    });
+    if (candidates.length === 0) return { commands: [] };
+
+    // Mark từng command nguyên tử bằng updateMany với điều kiện status còn
+    // pending — nếu foreground socket đã ack mất giữa lúc ta findMany và
+    // update, count sẽ = 0 và ta bỏ qua, tránh double-execute. Phải làm
+    // per-row vì updateMany batch không nói được row nào đã skip.
+    const now = new Date();
+    const claimed = [];
+    for (const c of candidates) {
+      const r = await this.prisma.device_commands.updateMany({
+        where: { id: c.id, status: 'pending' },
+        data: { status: 'delivered', delivered_at: now },
+      });
+      if (r.count === 1) claimed.push(c);
+    }
+
+    for (const cmd of claimed) {
+      this.clearTimeout(cmd.id);
+      this.events.emitCommandStatusChanged({
+        deviceId,
+        commandId: cmd.id,
+        status: 'delivered',
+      });
+    }
+
+    return {
+      commands: claimed.map((c) => ({
+        commandId: c.id,
+        command: c.command,
+        payload: c.payload ?? {},
+      })),
+    };
+  }
+
+  /**
+   * HTTP result endpoint cho mobile background. Verify command thuộc về
+   * device (tránh device A report kết quả của device B), rồi delegate cho
+   * handleResult — cùng path với socket result để giữ một nguồn sự thật.
+   */
+  async submitResultFromDevice(
+    deviceId: string,
+    commandId: string,
+    success: boolean,
+    error?: string | null,
+  ): Promise<void> {
+    const cmd = await this.prisma.device_commands.findUnique({
+      where: { id: commandId },
+      select: { device_id: true },
+    });
+    if (!cmd) throw new NotFoundException('Command not found');
+    if (cmd.device_id !== deviceId) {
+      throw new ForbiddenException('Command không thuộc thiết bị này');
+    }
+    await this.handleResult({ commandId, success, error });
+  }
+
   async handleAck(commandId: string): Promise<void> {
     const existing = await this.prisma.device_commands.findUnique({
       where: { id: commandId },

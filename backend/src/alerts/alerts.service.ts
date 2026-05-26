@@ -8,7 +8,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../push/push.service';
 
-const OFFLINE_THRESHOLD_MS = 15 * 60 * 1000;
+const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000;
+const OFFLINE_THRESHOLD_MIN = OFFLINE_THRESHOLD_MS / 60_000;
 
 /**
  * Tổng hợp các alert cron-based (offline) + bắt cầu socket events sang
@@ -26,12 +27,13 @@ export class AlertsService {
   ) {}
 
   /**
-   * Mỗi vài phút quét devices có last_seen quá ngưỡng mà chưa được alert.
+   * Mỗi phút quét devices có last_seen quá ngưỡng mà chưa được alert.
    * Set flag để không spam push trong những lần quét tiếp theo; flag sẽ
    * tự reset khi device gửi heartbeat (ingest.service.persistInBackground).
-   * Chu kỳ 5 phút đủ phản ứng cho ngưỡng 15 phút.
+   * Cron 1 phút + ngưỡng 5 phút → trễ cảnh báo tối đa ~6 phút, phù hợp
+   * app giám sát trẻ em / người già.
    */
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  @Cron(CronExpression.EVERY_MINUTE)
   async detectOfflineDevices(): Promise<void> {
     const cutoff = new Date(Date.now() - OFFLINE_THRESHOLD_MS);
     const stale = await this.prisma.devices.findMany({
@@ -65,7 +67,7 @@ export class AlertsService {
       void this.push.send(d.parent_account_id, {
         type: 'device_offline',
         title: '⚠️ Thiết bị mất kết nối',
-        body: `${d.person_name} không gửi tín hiệu hơn 15 phút.`,
+        body: `${d.person_name} không gửi tín hiệu hơn ${OFFLINE_THRESHOLD_MIN} phút.`,
         url: `/tracking?focus=${d.id}`,
         data: { deviceId: d.id, lastSeen: lastSeenIso },
       });

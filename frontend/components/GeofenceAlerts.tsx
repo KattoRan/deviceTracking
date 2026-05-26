@@ -710,7 +710,7 @@ export function GeofenceBell({ className }: { className?: string }) {
                             </span>
                           </div>
                           <div className="mt-0.5 text-xs text-slate-600">
-                            Không gửi tín hiệu hơn 15 phút.
+                            Không gửi tín hiệu hơn 5 phút.
                           </div>
                           <div className="mt-0.5 text-[11px] text-slate-500">
                             {a.item.lastSeen
