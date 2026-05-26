@@ -1,7 +1,6 @@
 "use client";
 
 import { formatDistanceToNow } from "@/lib/utils";
-import { API_BASE_URL } from "@/lib/api";
 import {
   Battery,
   CheckCircle2,
@@ -11,10 +10,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { io } from "socket.io-client";
+import { useGeofenceAlerts } from "@/components/GeofenceAlerts";
 import { sosService, type SosEvent } from "@/services/sosService";
 
 export default function SosHistoryPage() {
+  const { sos } = useGeofenceAlerts();
   const [events, setEvents] = useState<SosEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,25 +32,12 @@ export default function SosHistoryPage() {
     }
   }, []);
 
+  // Refresh khi mount + khi provider context thêm SOS mới (chưa ack). Provider
+  // đã subscribe sos_alert global từ AppLayout — page không tự mở socket riêng
+  // nữa. SOS đã ack vẫn phải fetch qua API nên refresh() vẫn cần.
   useEffect(() => {
     void refresh();
-  }, [refresh]);
-
-  // Realtime: subscribe sos_alert qua socket → refresh list. Server emit
-  // toàn cục; refresh() filter qua API (đã scope theo parentAccountId).
-  useEffect(() => {
-    const socket = io(API_BASE_URL, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-    });
-    socket.on("sos_alert", () => {
-      void refresh();
-    });
-    return () => {
-      socket.off("sos_alert");
-      socket.disconnect();
-    };
-  }, [refresh]);
+  }, [refresh, sos.length]);
 
   async function handleAck(id: string) {
     if (acking) return;
