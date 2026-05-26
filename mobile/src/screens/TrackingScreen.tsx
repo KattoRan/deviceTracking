@@ -280,6 +280,26 @@ export default function TrackingScreen() {
     };
   }, [storedData?.deviceId]);
 
+  // Re-fetch khi app trở lại foreground để phụ huynh đổi sđt trên web là
+  // mobile thấy lần sau mở app. Dùng prev-state riêng — không share
+  // `appStateRef` với listener telemetry để tránh race khi cả 2 listener
+  // cùng fire trên 1 event (thứ tự không đảm bảo).
+  useEffect(() => {
+    if (!storedData?.deviceId) return;
+    const deviceId = storedData.deviceId;
+    let prevState: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = prevState;
+      prevState = next;
+      if (prev.match(/inactive|background/) && next === 'active') {
+        fetchParentContact(deviceId)
+          .then((info) => setParentContact(info))
+          .catch(() => undefined);
+      }
+    });
+    return () => sub.remove();
+  }, [storedData?.deviceId]);
+
   const toggleBackground = useCallback(async () => {
     if (bgToggling) return;
     setBgToggling(true);
