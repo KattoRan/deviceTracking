@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'parent@example.com' })
@@ -56,4 +63,12 @@ export class LoginResponseDto {
 
   @ApiProperty({ type: ParentAccountDto })
   parentAccount: ParentAccountDto;
+}
+
+export class UpdateProfileDto {
+  @ApiProperty({ example: '0987654321', nullable: true, required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phoneNumber?: string | null;
 }

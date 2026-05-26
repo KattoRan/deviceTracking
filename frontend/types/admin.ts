@@ -18,6 +18,10 @@ export interface LoginInput {
   password: string;
 }
 
+export interface UpdateProfileInput {
+  phoneNumber: string | null;
+}
+
 export interface LoginResponse {
   token: string;
   parentAccount: ParentAccount;

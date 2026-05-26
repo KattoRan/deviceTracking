@@ -550,19 +550,19 @@ const styles = StyleSheet.create({
   toggleText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   contactRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#EEE',
+    gap: 12,
   },
-  contactLabel: { fontSize: 14, color: '#666' },
+  contactLabel: { fontSize: 14, color: '#666', flexShrink: 0 },
   contactValue: {
+    flex: 1,
     fontSize: 15,
     fontWeight: '600',
     color: '#333',
     textAlign: 'right',
-    maxWidth: '60%',
   },
   callBtn: {
     backgroundColor: '#1976D2',

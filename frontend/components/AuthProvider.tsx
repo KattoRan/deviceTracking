@@ -10,7 +10,12 @@ import {
   type ReactNode,
 } from "react";
 import { authService, tokenStorage } from "@/services/authService";
-import type { LoginInput, ParentAccount, RegisterInput } from "@/types/admin";
+import type {
+  LoginInput,
+  ParentAccount,
+  RegisterInput,
+  UpdateProfileInput,
+} from "@/types/admin";
 
 interface AuthContextValue {
   parentAccount: ParentAccount | null;
@@ -18,6 +23,7 @@ interface AuthContextValue {
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<ParentAccount>;
   refresh: () => Promise<void>;
+  updateProfile: (input: UpdateProfileInput) => Promise<ParentAccount>;
   logout: () => void;
 }
 
@@ -70,14 +76,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const updateProfile = useCallback(
+    async (input: UpdateProfileInput): Promise<ParentAccount> => {
+      const updated = await authService.updateProfile(input);
+      setParentAccount(updated);
+      return updated;
+    },
+    [],
+  );
+
   const logout = useCallback(() => {
     tokenStorage.clear();
     setParentAccount(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ parentAccount, loading, login, register, refresh, logout }),
-    [parentAccount, loading, login, register, refresh, logout],
+    () => ({
+      parentAccount,
+      loading,
+      login,
+      register,
+      refresh,
+      updateProfile,
+      logout,
+    }),
+    [parentAccount, loading, login, register, refresh, updateProfile, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

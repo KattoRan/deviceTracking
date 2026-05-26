@@ -4,6 +4,7 @@ import type {
   LoginResponse,
   ParentAccount,
   RegisterInput,
+  UpdateProfileInput,
 } from "@/types/admin";
 
 export { AUTH_TOKEN_KEY };
@@ -42,6 +43,14 @@ export const authService = {
 
   me: async (): Promise<ParentAccount> => {
     const { data } = await apiClient.get<ParentAccount>("api/v1/auth/me");
+    return data;
+  },
+
+  updateProfile: async (input: UpdateProfileInput): Promise<ParentAccount> => {
+    const { data } = await apiClient.patch<ParentAccount>(
+      "api/v1/auth/me",
+      input,
+    );
     return data;
   },
 };

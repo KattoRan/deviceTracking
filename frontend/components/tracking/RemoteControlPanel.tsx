@@ -7,7 +7,6 @@ import {
   Lock,
   LockOpen,
   MapPin,
-  Power,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -64,11 +63,6 @@ export default function RemoteControlPanel({ deviceId, isLocked, onLockChange }:
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [lockLoading, setLockLoading] = useState(false);
-
-  // `toggle_tracking` needs both enable/disable — we keep a local hint toggled
-  // each time the user presses the button. The true source of truth lives on
-  // the device; this is purely a UI guess so the next press sends the opposite.
-  const [trackingHint, setTrackingHint] = useState(true);
 
   const reloadHistory = useCallback(async () => {
     try {
@@ -216,16 +210,6 @@ export default function RemoteControlPanel({ deviceId, isLocked, onLockChange }:
           onClick={() => sendCommand("ring_alarm", { durationSec: 10 })}
           disabled={isBusy(active)}
           tone="amber"
-        />
-        <CommandButton
-          icon={Power}
-          label={trackingHint ? "Dừng tracking" : "Bật tracking"}
-          onClick={() => {
-            void sendCommand("toggle_tracking", { enabled: !trackingHint });
-            setTrackingHint((v) => !v);
-          }}
-          disabled={isBusy(active)}
-          tone={trackingHint ? "emerald" : "slate"}
         />
         <button
           type="button"

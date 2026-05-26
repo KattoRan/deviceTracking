@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import {
   History,
@@ -17,12 +18,24 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
-import {
-  GeofenceAlertsProvider,
-  GeofenceBell,
-  GeofenceReturnedToasts,
-} from "@/components/GeofenceAlerts";
 import { cn } from "@/lib/utils";
+
+// Lazy: socket.io + alert state chỉ cần khi user đã login.
+// Tránh cõng vào bundle của /login, /register.
+const GeofenceAlertsProvider = dynamic(
+  () =>
+    import("@/components/GeofenceAlerts").then((m) => m.GeofenceAlertsProvider),
+  { ssr: false },
+);
+const GeofenceBell = dynamic(
+  () => import("@/components/GeofenceAlerts").then((m) => m.GeofenceBell),
+  { ssr: false },
+);
+const GeofenceReturnedToasts = dynamic(
+  () =>
+    import("@/components/GeofenceAlerts").then((m) => m.GeofenceReturnedToasts),
+  { ssr: false },
+);
 
 type NavItem = {
   name: string;

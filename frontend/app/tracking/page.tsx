@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { AnimatePresence } from "framer-motion";
 import { AlertCircle, Menu } from "lucide-react";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -40,6 +39,11 @@ const DeviceDetailPanel = dynamic(
 
 const TrackingIntervalControl = dynamic(
   () => import("@/components/tracking/TrackingIntervalControl"),
+  { ssr: false },
+);
+
+const AnimatePresence = dynamic(
+  () => import("framer-motion").then((m) => m.AnimatePresence),
   { ssr: false },
 );
 

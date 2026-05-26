@@ -12,6 +12,7 @@ import {
   LoginResponseDto,
   ParentAccountDto,
   RegisterDto,
+  UpdateProfileDto,
 } from './dto/login.dto';
 import { generatePairingCode } from './pairing-code.util';
 
@@ -76,6 +77,32 @@ export class AuthService {
       where: { id },
     });
     if (!account) throw new UnauthorizedException('Tài khoản không tồn tại');
+    return this.toDto(account);
+  }
+
+  async updateProfile(
+    id: string,
+    dto: UpdateProfileDto,
+  ): Promise<ParentAccountDto> {
+    const data: { phone_number?: string | null } = {};
+    if (dto.phoneNumber !== undefined) {
+      const trimmed = dto.phoneNumber?.trim();
+      data.phone_number = trimmed ? trimmed : null;
+    }
+    const account = await this.prisma.parent_accounts.update({
+      where: { id },
+      data,
+    });
+    return this.toDto(account);
+  }
+
+  private toDto(account: {
+    id: string;
+    email: string;
+    display_name: string | null;
+    phone_number: string | null;
+    pairing_code: string;
+  }): ParentAccountDto {
     return {
       id: account.id,
       email: account.email,

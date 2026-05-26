@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -22,6 +23,7 @@ import {
   LoginResponseDto,
   ParentAccountDto,
   RegisterDto,
+  UpdateProfileDto,
 } from './dto/login.dto';
 import { JwtAuthGuard, type AuthedRequest } from './jwt-auth.guard';
 
@@ -55,5 +57,20 @@ export class AuthController {
   @ApiOkResponse({ type: ParentAccountDto })
   me(@Req() req: AuthedRequest): Promise<ParentAccountDto> {
     return this.authService.findById(req.parentAccount.sub);
+  }
+
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Cập nhật thông tin tài khoản phụ huynh (sđt liên lạc cho app mobile)',
+  })
+  @ApiOkResponse({ type: ParentAccountDto })
+  updateMe(
+    @Req() req: AuthedRequest,
+    @Body() dto: UpdateProfileDto,
+  ): Promise<ParentAccountDto> {
+    return this.authService.updateProfile(req.parentAccount.sub, dto);
   }
 }
