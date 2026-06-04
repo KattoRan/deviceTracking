@@ -1,74 +1,24 @@
 "use client";
 
-import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 
-import L from "leaflet";
-import { Fragment, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { MapRef, MarkerDragEvent } from "react-map-gl/maplibre";
 import {
-  Circle,
-  MapContainer,
-  Marker,
-  TileLayer,
-  ZoomControl,
-  useMap,
-  useMapEvents,
-} from "react-leaflet";
+  AttributionControl,
+  Map as MapGL,
+  Marker as MapMarker,
+  NavigationControl,
+  Source,
+  Layer,
+} from "react-map-gl/maplibre";
+import type { FeatureCollection, Polygon } from "geojson";
+import type { MapLayerMouseEvent } from "maplibre-gl";
+import { GOONG_ATTRIBUTION, GOONG_STYLE_URL } from "@/lib/mapTiles";
+import { metersCircle } from "@/lib/geoCircle";
 import type { GeofenceListItem } from "@/types/geofence";
 
-const HANOI_CENTER: [number, number] = [21.0285, 105.8542];
-const CARTO_VOYAGER_TILES =
-  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-
-function centerIcon(active: boolean): L.DivIcon {
-  return L.divIcon({
-    className: "geofence-center",
-    html: `<div style="
-      width: 22px; height: 22px;
-      border-radius: 50%;
-      background: ${active ? "#059669" : "#94a3b8"};
-      border: 3px solid white;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-    "></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
-function ClickHandler({
-  onClick,
-}: {
-  onClick: ((lat: number, lon: number) => void) | null;
-}) {
-  useMapEvents({
-    click(e) {
-      if (onClick) onClick(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-}
-
-function FlyToActive({
-  center,
-}: {
-  center: [number, number] | null;
-}) {
-  const map = useMap();
-  useEffect(() => {
-    if (!center) return;
-    map.flyTo(center, Math.max(map.getZoom(), 14), { duration: 0.6 });
-  }, [center, map]);
-  return null;
-}
-
-function InvalidateOnResize() {
-  const map = useMap();
-  useEffect(() => {
-    const observer = new ResizeObserver(() => map.invalidateSize());
-    observer.observe(map.getContainer());
-    return () => observer.disconnect();
-  }, [map]);
-  return null;
-}
+const HANOI_CENTER = { longitude: 105.8542, latitude: 21.0285, zoom: 12 };
 
 interface GeofenceMapProps {
   geofences: GeofenceListItem[];
@@ -89,96 +39,233 @@ export default function GeofenceMap({
   onCenterChange,
   onSelect,
 }: GeofenceMapProps) {
+  const mapRef = useRef<MapRef | null>(null);
+
   const activeZone = useMemo(
     () => geofences.find((g) => g.id === activeId) ?? null,
     [geofences, activeId],
   );
 
-  const flyCenter: [number, number] | null = useMemo(() => {
-    if (draft) return [draft.lat, draft.lon];
-    if (activeZone) return [activeZone.lat, activeZone.lon];
+  // ─── Fly tới zone đang chỉnh / draft ───
+  const flyCenter = useMemo<[number, number] | null>(() => {
+    if (draft) return [draft.lon, draft.lat];
+    if (activeZone) return [activeZone.lon, activeZone.lat];
     return null;
   }, [draft, activeZone]);
 
-  return (
-    <MapContainer
-      center={HANOI_CENTER}
-      zoom={12}
-      className="h-full w-full"
-      zoomControl={false}
-    >
-      <TileLayer
-        url={CARTO_VOYAGER_TILES}
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        maxZoom={19}
-        subdomains="abcd"
-      />
-      <ZoomControl position="bottomright" />
-      <InvalidateOnResize />
-      <ClickHandler onClick={editing ? onCenterChange : null} />
-      <FlyToActive center={flyCenter} />
+  useEffect(() => {
+    if (!flyCenter) return;
+    const map = mapRef.current;
+    if (!map) return;
+    map.flyTo({
+      center: flyCenter,
+      zoom: Math.max(map.getZoom(), 14),
+      duration: 600,
+    });
+  }, [flyCenter]);
 
+  // ─── GeoJSON cho saved zones (split active / inactive để style khác nhau) ───
+  const inactiveZones = useMemo<FeatureCollection<Polygon>>(() => {
+    const features = geofences
+      .filter((g) => g.id !== activeId)
+      .map((g) =>
+        metersCircle(g.lon, g.lat, g.radiusM, {
+          id: g.id,
+          name: g.name,
+          radiusM: g.radiusM,
+        }),
+      );
+    return { type: "FeatureCollection", features };
+  }, [geofences, activeId]);
+
+  const activeZoneRing = useMemo<FeatureCollection<Polygon>>(() => {
+    if (!activeZone) return { type: "FeatureCollection", features: [] };
+    return {
+      type: "FeatureCollection",
+      features: [
+        metersCircle(activeZone.lon, activeZone.lat, activeZone.radiusM, {
+          id: activeZone.id,
+          name: activeZone.name,
+        }),
+      ],
+    };
+  }, [activeZone]);
+
+  const draftRing = useMemo<FeatureCollection<Polygon>>(() => {
+    if (!draft) return { type: "FeatureCollection", features: [] };
+    return {
+      type: "FeatureCollection",
+      features: [metersCircle(draft.lon, draft.lat, draft.radiusM)],
+    };
+  }, [draft]);
+
+  // ─── Click trên nền map → đặt lại tâm khi đang editing ───
+  // Vẫn cho click vào vòng inactive để select zone đó — handle qua
+  // interactiveLayerIds + filter trong handler.
+  const handleClick = useCallback(
+    (e: MapLayerMouseEvent) => {
+      const hit = (e.features ?? []).find((f) =>
+        f.layer.id === "inactive-zones-fill",
+      );
+      if (hit) {
+        const id = hit.properties?.id;
+        if (typeof id === "string") {
+          onSelect(id);
+          return;
+        }
+      }
+      if (editing) {
+        onCenterChange(e.lngLat.lat, e.lngLat.lng);
+      }
+    },
+    [editing, onCenterChange, onSelect],
+  );
+
+  const handleMarkerDrag = useCallback(
+    (e: MarkerDragEvent) => {
+      onCenterChange(e.lngLat.lat, e.lngLat.lng);
+    },
+    [onCenterChange],
+  );
+
+  const setCursor = useCallback((cursor: string) => {
+    const map = mapRef.current?.getMap();
+    if (map) map.getCanvas().style.cursor = cursor;
+  }, []);
+
+  return (
+    <MapGL
+      ref={mapRef}
+      initialViewState={HANOI_CENTER}
+      mapStyle={GOONG_STYLE_URL}
+      style={{ width: "100%", height: "100%" }}
+      attributionControl={false}
+      onClick={handleClick}
+      onMouseEnter={() => setCursor("pointer")}
+      onMouseLeave={() => setCursor("")}
+      interactiveLayerIds={["inactive-zones-fill"]}
+      cursor={editing ? "crosshair" : "grab"}
+    >
+      <NavigationControl position="bottom-right" showCompass={false} />
+      <AttributionControl customAttribution={GOONG_ATTRIBUTION} compact />
+
+      {/* Saved zones — không active (xanh dương nhạt) */}
+      <Source id="inactive-zones" type="geojson" data={inactiveZones}>
+        <Layer
+          id="inactive-zones-fill"
+          type="fill"
+          paint={{
+            "fill-color": "#38bdf8",
+            "fill-opacity": 0.08,
+          }}
+        />
+        <Layer
+          id="inactive-zones-line"
+          type="line"
+          paint={{
+            "line-color": "#0ea5e9",
+            "line-width": 2,
+            "line-opacity": 0.9,
+          }}
+        />
+      </Source>
+
+      {/* Saved zone — active (xanh lá đậm) */}
+      <Source id="active-zone" type="geojson" data={activeZoneRing}>
+        <Layer
+          id="active-zone-fill"
+          type="fill"
+          paint={{
+            "fill-color": "#10b981",
+            "fill-opacity": 0.18,
+          }}
+        />
+        <Layer
+          id="active-zone-line"
+          type="line"
+          paint={{
+            "line-color": "#059669",
+            "line-width": 3,
+            "line-opacity": 0.9,
+          }}
+        />
+      </Source>
+
+      {/* Draft zone — cam đứt nét */}
+      <Source id="draft-zone" type="geojson" data={draftRing}>
+        <Layer
+          id="draft-zone-fill"
+          type="fill"
+          paint={{
+            "fill-color": "#fbbf24",
+            "fill-opacity": 0.15,
+          }}
+        />
+        <Layer
+          id="draft-zone-line"
+          type="line"
+          paint={{
+            "line-color": "#f59e0b",
+            "line-width": 3,
+            "line-dasharray": [6, 4],
+            "line-opacity": 0.95,
+          }}
+        />
+      </Source>
+
+      {/* Center markers — saved zones (click để select; drag chỉ khi active+editing) */}
       {geofences.map((g) => {
         const isActive = g.id === activeId;
+        const draggable = isActive && editing && !draft;
         return (
-          <Fragment key={g.id}>
-            <Circle
-              center={[g.lat, g.lon]}
-              radius={g.radiusM}
-              pathOptions={{
-                color: isActive ? "#059669" : "#0ea5e9",
-                weight: isActive ? 3 : 2,
-                opacity: 0.9,
-                fillColor: isActive ? "#10b981" : "#38bdf8",
-                fillOpacity: isActive ? 0.18 : 0.08,
-              }}
-              eventHandlers={{ click: () => onSelect(g.id) }}
-            />
-            <Marker
-              position={[g.lat, g.lon]}
-              icon={centerIcon(isActive)}
-              draggable={isActive && editing && !draft}
-              eventHandlers={{
-                click: () => onSelect(g.id),
-                dragend: (e) => {
-                  const m = e.target as L.Marker;
-                  const { lat, lng } = m.getLatLng();
-                  onCenterChange(lat, lng);
-                },
+          <MapMarker
+            key={g.id}
+            longitude={g.lon}
+            latitude={g.lat}
+            anchor="center"
+            draggable={draggable}
+            onDragEnd={draggable ? handleMarkerDrag : undefined}
+            onClick={(e) => {
+              e.originalEvent.stopPropagation();
+              onSelect(g.id);
+            }}
+          >
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: "50%",
+                background: isActive ? "#059669" : "#94a3b8",
+                border: "3px solid white",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+                cursor: draggable ? "grab" : "pointer",
               }}
             />
-          </Fragment>
+          </MapMarker>
         );
       })}
 
       {draft && (
-        <>
-          <Circle
-            center={[draft.lat, draft.lon]}
-            radius={draft.radiusM}
-            pathOptions={{
-              color: "#f59e0b",
-              weight: 3,
-              opacity: 0.95,
-              dashArray: "6 4",
-              fillColor: "#fbbf24",
-              fillOpacity: 0.15,
+        <MapMarker
+          longitude={draft.lon}
+          latitude={draft.lat}
+          anchor="center"
+          draggable={editing}
+          onDragEnd={editing ? handleMarkerDrag : undefined}
+        >
+          <div
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              background: "#059669",
+              border: "3px solid white",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+              cursor: editing ? "grab" : "default",
             }}
           />
-          <Marker
-            position={[draft.lat, draft.lon]}
-            icon={centerIcon(true)}
-            draggable={editing}
-            eventHandlers={{
-              dragend: (e) => {
-                const m = e.target as L.Marker;
-                const { lat, lng } = m.getLatLng();
-                onCenterChange(lat, lng);
-              },
-            }}
-          />
-        </>
+        </MapMarker>
       )}
-    </MapContainer>
+    </MapGL>
   );
 }
