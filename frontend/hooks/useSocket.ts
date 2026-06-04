@@ -1,20 +1,22 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { io, type Socket } from "socket.io-client";
-import { API_BASE_URL } from "@/lib/api";
+import { useGeofenceAlerts } from "@/components/GeofenceAlerts";
 import type { DeviceMovedEvent } from "@/types/device";
 
 type DeviceMovedHandler = (event: DeviceMovedEvent) => void;
 
 /**
- * Connects to the backend Socket.IO gateway and invokes `onDeviceMoved` for
- * every `device_moved` event. The socket is kept alive for the component's
- * lifetime and the callback is accessed via ref so consumers can pass an
- * inline handler without forcing reconnects on every render.
+ * Đăng ký `device_moved` qua socket dùng chung của <GeofenceAlertsProvider>.
+ * Trước đây hook tự mở socket riêng — đã hợp nhất để toàn bộ web chỉ có một
+ * kết nối Socket.IO, tránh nhân đôi traffic và race khi nhiều listener cùng
+ * cập nhật state.
+ *
+ * Handler được giữ qua ref nên caller có thể truyền inline mà không gây
+ * subscribe/unsubscribe theo mỗi render.
  */
 export function useSocket(onDeviceMoved: DeviceMovedHandler) {
-  const socketRef = useRef<Socket | null>(null);
+  const { subscribeDeviceMoved } = useGeofenceAlerts();
   const handlerRef = useRef(onDeviceMoved);
 
   useEffect(() => {
@@ -22,26 +24,6 @@ export function useSocket(onDeviceMoved: DeviceMovedHandler) {
   }, [onDeviceMoved]);
 
   useEffect(() => {
-    const socket = io(API_BASE_URL, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1_000,
-      reconnectionDelayMax: 10_000,
-    });
-
-    socket.on("device_moved", (event: DeviceMovedEvent) => {
-      handlerRef.current(event);
-    });
-
-    socketRef.current = socket;
-
-    return () => {
-      socket.off("device_moved");
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, []);
-
-  return socketRef;
+    return subscribeDeviceMoved((event) => handlerRef.current(event));
+  }, [subscribeDeviceMoved]);
 }

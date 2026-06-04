@@ -2,10 +2,18 @@
 
 import dynamic from "next/dynamic";
 import { AlertCircle, Menu } from "lucide-react";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useSocket } from "@/hooks/useSocket";
+import { useGeofenceAlerts } from "@/components/GeofenceAlerts";
 import deviceService from "@/services/deviceService";
 import btsService, { type MapBounds } from "@/services/btsService";
 import geofenceService from "@/services/geofenceService";
@@ -87,6 +95,33 @@ function TrackingPageInner() {
     );
   }, []);
   useSocket(handleDeviceMoved);
+
+  // Derive trạng thái offline từ socket dùng chung. Trước đây trang chỉ nghe
+  // `device_moved`, nên khi cron mark device offline marker vẫn "đang hoạt
+  // động" cho tới khi reload. Giờ `offline` từ provider là source of truth →
+  // map nó vào field `status` ngay tại render, không cần useEffect/setState.
+  const { offline } = useGeofenceAlerts();
+  const offlineIds = useMemo(
+    () => new Set(offline.map((o) => o.deviceId)),
+    [offline],
+  );
+  const effectiveDevices = useMemo<Device[]>(
+    () =>
+      offlineIds.size === 0
+        ? devices
+        : devices.map((d) =>
+            offlineIds.has(d.id) && d.status !== "offline"
+              ? { ...d, status: "offline" as const }
+              : d,
+          ),
+    [devices, offlineIds],
+  );
+  const effectiveSelected = useMemo<Device | null>(() => {
+    if (!selectedDevice) return null;
+    if (!offlineIds.has(selectedDevice.id)) return selectedDevice;
+    if (selectedDevice.status === "offline") return selectedDevice;
+    return { ...selectedDevice, status: "offline" };
+  }, [selectedDevice, offlineIds]);
 
   useEffect(() => {
     if (isMobile || isTablet) setSidebarOpen(false);
@@ -174,15 +209,15 @@ function TrackingPageInner() {
     [isMobile],
   );
 
-  const mappableDevices = devices.filter(
+  const mappableDevices = effectiveDevices.filter(
     (d) => d.latitude != null && d.longitude != null,
   );
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-100">
       <DeviceSidebar
-        devices={devices}
-        selectedDevice={selectedDevice}
+        devices={effectiveDevices}
+        selectedDevice={effectiveSelected}
         onDeviceSelect={handleDeviceSelect}
         loading={devicesLoading}
         open={sidebarOpen}
@@ -205,7 +240,7 @@ function TrackingPageInner() {
         <MapView
           devices={mappableDevices}
           geoJsonData={geoJsonData}
-          selectedDevice={selectedDevice}
+          selectedDevice={effectiveSelected}
           onDeviceClick={setSelectedDevice}
           onMapMove={handleMapMove}
           showBts={showBts}
@@ -229,10 +264,10 @@ function TrackingPageInner() {
         <TrackingIntervalControl />
 
         <AnimatePresence>
-          {selectedDevice && (
+          {effectiveSelected && (
             <DeviceDetailPanel
-              key={selectedDevice.id}
-              device={selectedDevice}
+              key={effectiveSelected.id}
+              device={effectiveSelected}
               onClose={() => setSelectedDevice(null)}
               isMobile={isMobile}
               onLockChange={handleLockChange}

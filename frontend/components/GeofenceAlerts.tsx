@@ -27,6 +27,9 @@ import geofenceService from "@/services/geofenceService";
 import { sosService, type SosEvent } from "@/services/sosService";
 import { cn } from "@/lib/utils";
 import type { GeofenceBreachEvent } from "@/types/geofence";
+import type { DeviceMovedEvent } from "@/types/device";
+
+type DeviceMovedHandler = (event: DeviceMovedEvent) => void;
 
 const RETURNED_DISMISS_MS = 6_000;
 let returnedCounter = 0;
@@ -76,10 +79,6 @@ interface OfflineSocketEvent {
   timestamp: string;
 }
 
-interface DeviceMovedMinimalEvent {
-  deviceId: string;
-}
-
 // Hysteresis ngưỡng disarm phải khớp BE: ingest.service LOW_BATTERY_RESET_THRESHOLD=25.
 const LOW_BATTERY_CLEAR_AT = 25;
 
@@ -120,6 +119,11 @@ interface MonitoringAlertsContextValue {
   ackSos: (sosEventId: string) => Promise<void>;
   dismissLowBattery: (deviceId: string) => void;
   dismissOffline: (deviceId: string) => void;
+  /**
+   * Đăng ký lắng nghe device_moved trên socket dùng chung của provider.
+   * Trả về hàm gỡ đăng ký. Caller chịu trách nhiệm gọi nó trong cleanup.
+   */
+  subscribeDeviceMoved: (handler: DeviceMovedHandler) => () => void;
 }
 
 const MonitoringAlertsContext =
@@ -158,6 +162,17 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
     () => new Map(),
   );
   const [returned, setReturned] = useState<ReturnedToast[]>([]);
+  const deviceMovedHandlersRef = useRef<Set<DeviceMovedHandler>>(new Set());
+
+  const subscribeDeviceMoved = useCallback(
+    (handler: DeviceMovedHandler) => {
+      deviceMovedHandlersRef.current.add(handler);
+      return () => {
+        deviceMovedHandlersRef.current.delete(handler);
+      };
+    },
+    [],
+  );
 
   const dismissReturned = useCallback((uid: string) => {
     setReturned((prev) => prev.filter((t) => t.uid !== uid));
@@ -300,13 +315,16 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
     });
 
     // Auto-clear: device online lại → ingest gửi `device_moved`, dọn offline.
-    socket.on("device_moved", (event: DeviceMovedMinimalEvent) => {
+    // Đồng thời dispatch cho các subscriber bên ngoài (vd trang tracking dùng
+    // event này để cập nhật toạ độ marker), để 1 socket phục vụ nhiều consumer.
+    socket.on("device_moved", (event: DeviceMovedEvent) => {
       setOfflineMap((prev) => {
         if (!prev.has(event.deviceId)) return prev;
         const next = new Map(prev);
         next.delete(event.deviceId);
         return next;
       });
+      for (const h of deviceMovedHandlersRef.current) h(event);
     });
 
     return () => {
@@ -395,6 +413,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       ackSos,
       dismissLowBattery,
       dismissOffline,
+      subscribeDeviceMoved,
     }),
     [
       outside,
@@ -407,6 +426,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       ackSos,
       dismissLowBattery,
       dismissOffline,
+      subscribeDeviceMoved,
     ],
   );
 
