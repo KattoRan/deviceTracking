@@ -23,5 +23,7 @@ const GOONG_MAPTILES_KEY = process.env.NEXT_PUBLIC_GOONG_MAPTILES_KEY ?? "";
  */
 export const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json?api_key=${GOONG_MAPTILES_KEY}`;
 
+// Goong style đã tự inject "© Goong Maps" qua attribution của source. Ta chỉ
+// thêm OpenStreetMap (raw data layer bên dưới) để khỏi credit Goong 2 lần.
 export const GOONG_ATTRIBUTION =
-  '© <a href="https://goong.io" target="_blank" rel="noopener">Goong</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+  '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
