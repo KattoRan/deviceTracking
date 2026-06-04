@@ -13,9 +13,8 @@ import {
   Layer,
   AttributionControl,
 } from "react-map-gl/maplibre";
-import type { MapLayerMouseEvent } from "maplibre-gl";
 import type { FeatureCollection, LineString, Point, Polygon } from "geojson";
-import { GOONG_ATTRIBUTION, GOONG_STYLE_URL } from "@/lib/mapTiles";
+import { GOONG_ATTRIBUTION, GOONG_STYLE_URL, hidePoiLayers } from "@/lib/mapTiles";
 import { metersCircle } from "@/lib/geoCircle";
 import type { MapBounds } from "@/services/btsService";
 import type { BtsFeature, BtsGeoJson } from "@/types/bts";
@@ -264,63 +263,28 @@ export default function MapView({
     return ids;
   }, [devices]);
 
-  const btsPoints = useMemo<FeatureCollection<Point>>(() => {
-    if (!geoJsonData || !showBts) return { type: "FeatureCollection", features: [] };
-    const features = geoJsonData.features
+  // BTS render qua <Marker> SVG (tháp ăng-ten) — không dùng GPU circle layer
+  // vì user muốn giữ icon dấu hiệu rõ. Khi showBts=true: tất cả BTS. Khi
+  // showBts=false: chỉ BTS đang kết nối (signal cho operator).
+  const btsList = useMemo(() => {
+    if (!geoJsonData) return [];
+    return geoJsonData.features
       .filter((f) => f.properties.type === "bts" && f.properties.id != null)
-      .map((f) => {
+      .flatMap((f) => {
         const id = f.properties.id!;
         const isConnected = connectedBtsIds.has(id);
-        return {
-          type: "Feature" as const,
-          geometry: {
-            type: "Point" as const,
-            coordinates: [
-              Number(f.geometry.coordinates[0]),
-              Number(f.geometry.coordinates[1]),
-            ],
-          },
-          properties: {
+        if (!showBts && !isConnected) return [];
+        return [
+          {
             id,
+            lon: Number(f.geometry.coordinates[0]),
+            lat: Number(f.geometry.coordinates[1]),
             radio: f.properties.radio,
             radius: coverageRadius(f.properties),
             isConnected,
           },
-        };
+        ];
       });
-    return { type: "FeatureCollection", features };
-  }, [geoJsonData, showBts, connectedBtsIds]);
-
-  // Connected BTS phải luôn hiển thị kể cả khi showBts=false — đây là tín hiệu
-  // mạnh cho operator biết thiết bị đang nối với trạm nào. Khi showBts=true,
-  // chúng đã có trong btsPoints; khi showBts=false ta render thêm 1 nguồn riêng.
-  const connectedOnlyBts = useMemo<FeatureCollection<Point>>(() => {
-    if (showBts || !geoJsonData)
-      return { type: "FeatureCollection", features: [] };
-    const features = geoJsonData.features
-      .filter(
-        (f) =>
-          f.properties.type === "bts" &&
-          f.properties.id != null &&
-          connectedBtsIds.has(f.properties.id!),
-      )
-      .map((f) => ({
-        type: "Feature" as const,
-        geometry: {
-          type: "Point" as const,
-          coordinates: [
-            Number(f.geometry.coordinates[0]),
-            Number(f.geometry.coordinates[1]),
-          ],
-        },
-        properties: {
-          id: f.properties.id!,
-          radio: f.properties.radio,
-          radius: coverageRadius(f.properties),
-          isConnected: true,
-        },
-      }));
-    return { type: "FeatureCollection", features };
   }, [geoJsonData, showBts, connectedBtsIds]);
 
   const btsCoverage = useMemo<FeatureCollection<Polygon>>(() => {
@@ -370,40 +334,12 @@ export default function MapView({
     return { type: "FeatureCollection", features };
   }, [geoJsonData, showBts]);
 
-  const handleMapClick = useCallback(
-    (e: MapLayerMouseEvent) => {
-      const features = e.features ?? [];
-      const btsHit = features.find(
-        (f) =>
-          f.layer.id === "bts-points" ||
-          f.layer.id === "bts-points-connected" ||
-          f.layer.id === "bts-connected-only",
-      );
-      if (btsHit && btsHit.geometry.type === "Point") {
-        const [lon, lat] = btsHit.geometry.coordinates;
-        const p = btsHit.properties as {
-          id: number;
-          radio: string | null;
-          radius: number;
-          isConnected: boolean;
-        };
-        setBtsPopup({
-          longitude: lon,
-          latitude: lat,
-          id: p.id,
-          radio: p.radio,
-          radius: p.radius,
-          isConnected: !!p.isConnected,
-        });
-        setDevicePopup(null);
-        return;
-      }
-      // Click vào nền — đóng popup nếu đang mở.
-      setBtsPopup(null);
-      setDevicePopup(null);
-    },
-    [],
-  );
+  const handleMapClick = useCallback(() => {
+    // Click vào nền (không phải BTS/Marker) — đóng popup nếu đang mở. BTS
+    // click đi qua <Marker onClick>, không lọt vào đây vì stopPropagation.
+    setBtsPopup(null);
+    setDevicePopup(null);
+  }, []);
 
   // Đổi con trỏ thành "pointer" khi hover lên BTS để cho biết có thể click.
   const handleMouseEnter = useCallback(() => {
@@ -423,16 +359,14 @@ export default function MapView({
       style={{ width: "100%", height: "100%" }}
       attributionControl={false}
       onMoveEnd={reportBounds}
-      onLoad={reportBounds}
+      onLoad={(e) => {
+        hidePoiLayers(e.target);
+        reportBounds();
+      }}
       onClick={handleMapClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      interactiveLayerIds={[
-        "bts-points",
-        "bts-points-connected",
-        "bts-connected-only",
-        "bts-clusters",
-      ]}
+      interactiveLayerIds={["bts-clusters"]}
       cursor="grab"
     >
       <NavigationControl position="bottom-right" showCompass={false} />
@@ -522,45 +456,46 @@ export default function MapView({
         />
       </Source>
 
-      {/* BTS points — chia 2 lớp: thường (nhỏ, xanh) và đang kết nối (to, cam) */}
-      <Source id="bts-points-src" type="geojson" data={btsPoints}>
-        <Layer
-          id="bts-points"
-          type="circle"
-          filter={["!=", ["get", "isConnected"], true]}
-          paint={{
-            "circle-radius": 6,
-            "circle-color": "#0284c7",
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#ffffff",
-          }}
-        />
-        <Layer
-          id="bts-points-connected"
-          type="circle"
-          filter={["==", ["get", "isConnected"], true]}
-          paint={{
-            "circle-radius": 10,
-            "circle-color": "#d97706",
-            "circle-stroke-width": 3,
-            "circle-stroke-color": "#ffffff",
-          }}
-        />
-      </Source>
-
-      {/* Khi showBts=false vẫn render BTS đang kết nối */}
-      <Source id="bts-connected-only-src" type="geojson" data={connectedOnlyBts}>
-        <Layer
-          id="bts-connected-only"
-          type="circle"
-          paint={{
-            "circle-radius": 10,
-            "circle-color": "#d97706",
-            "circle-stroke-width": 3,
-            "circle-stroke-color": "#ffffff",
-          }}
-        />
-      </Source>
+      {/* BTS points — render qua <Marker> SVG ăng-ten, tham khảo icon cũ
+          ở BtsLayer.tsx (đã xoá). Connected thì to + cam + glow nhẹ. */}
+      {btsList.map((b) => (
+        <MapMarker
+          key={`bts-${b.id}`}
+          longitude={b.lon}
+          latitude={b.lat}
+          anchor="center"
+          style={{ zIndex: b.isConnected ? 100 : 0 }}
+        >
+          <button
+            type="button"
+            aria-label={`BTS #${b.id}`}
+            title={
+              b.isConnected
+                ? `${b.radio || "BTS"} #${b.id} (đang kết nối)`
+                : `${b.radio || "BTS"} #${b.id}`
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              setBtsPopup({
+                longitude: b.lon,
+                latitude: b.lat,
+                id: b.id,
+                radio: b.radio ?? null,
+                radius: b.radius,
+                isConnected: b.isConnected,
+              });
+              setDevicePopup(null);
+            }}
+            className="block bg-transparent border-0 p-0 cursor-pointer"
+          >
+            <BtsTowerIcon
+              size={b.isConnected ? 34 : 26}
+              color={b.isConnected ? "#d97706" : "#0284c7"}
+              connected={b.isConnected}
+            />
+          </button>
+        </MapMarker>
+      ))}
 
       {/* Cluster (gom trạm khi zoom out) */}
       <Source id="bts-clusters-src" type="geojson" data={clusterFeatures}>
@@ -605,14 +540,15 @@ export default function MapView({
         const selected = selectedDevice?.id === d.id;
         const isApprox =
           d.status === "online" && d.quality != null && d.quality !== "gps";
-        const size = selected ? 56 : 36;
+        const width = selected ? 32 : 24;
+        const height = width * 1.5;
         const opacity = isApprox ? 0.7 : 1;
         return (
           <MapMarker
             key={d.id}
             longitude={d.longitude}
             latitude={d.latitude}
-            anchor="center"
+            anchor="bottom"
             style={{ zIndex: selected ? 1000 : 1, opacity }}
           >
             <button
@@ -625,56 +561,62 @@ export default function MapView({
                 setBtsPopup(null);
               }}
               className="block bg-transparent border-0 p-0 cursor-pointer"
-              style={{ position: "relative", width: size, height: size }}
+              style={{ position: "relative", width, height }}
             >
               {selected && (
                 <span
                   style={{
                     position: "absolute",
-                    inset: -10,
+                    top: -6,
+                    left: width / 2 - 14,
+                    width: 28,
+                    height: 28,
                     borderRadius: "50%",
                     border: `2px solid ${color}`,
                     opacity: 0.6,
-                    animation:
-                      "device-marker-pulse 1.6s ease-out infinite",
+                    animation: "device-marker-pulse 1.6s ease-out infinite",
                   }}
                 />
               )}
-              <div
+              {/* Pin teardrop có hình điện thoại bên trong (vùng tròn) */}
+              <svg
+                viewBox="0 0 24 36"
+                width={width}
+                height={height}
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: size,
-                  height: size,
-                  borderRadius: "50%",
-                  background: color,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: selected
-                    ? "0 4px 14px rgba(15,23,42,0.35), 0 0 0 4px #fff, 0 0 0 7px #f59e0b"
-                    : "0 2px 6px rgba(15,23,42,0.25), 0 0 0 2px #fff",
-                  border: "2px solid #fff",
+                  display: "block",
+                  filter: `drop-shadow(0 2px 3px rgba(15,23,42,0.35))`,
                 }}
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  width={selected ? 22 : 16}
-                  height={selected ? 22 : 16}
-                  fill="none"
-                >
-                  <rect
-                    x="7"
-                    y="2"
-                    width="10"
-                    height="20"
-                    rx="2"
-                    stroke="white"
-                    strokeWidth="2"
-                  />
-                  <circle cx="12" cy="18" r="1" fill="white" />
-                </svg>
-              </div>
+                {/* Pin shape — fill màu status */}
+                <path
+                  d="M12 0 C5.4 0 0 5.4 0 12 C0 21 12 35 12 35 C12 35 24 21 24 12 C24 5.4 18.6 0 12 0 Z"
+                  fill={color}
+                  stroke={selected ? "#f59e0b" : "#fff"}
+                  strokeWidth={selected ? 2 : 1.5}
+                />
+                {/* Smartphone trong vùng tròn của pin (center ~ (12,12)) */}
+                <rect
+                  x="8.5"
+                  y="5"
+                  width="7"
+                  height="12"
+                  rx="1.4"
+                  fill="#fff"
+                />
+                {/* Màn hình */}
+                <rect
+                  x="9.2"
+                  y="6.3"
+                  width="5.6"
+                  height="8.4"
+                  rx="0.5"
+                  fill={color}
+                  opacity="0.35"
+                />
+                {/* Nút home */}
+                <circle cx="12" cy="15.7" r="0.6" fill={color} />
+              </svg>
               {d.spoofingSuspected && (
                 <div
                   style={{
@@ -824,6 +766,64 @@ function DevicePopupContent({ device }: { device: Device }) {
         <div style={{ fontSize: 11, color: "#64748b" }}>{device.district}</div>
       )}
     </div>
+  );
+}
+
+// Icon BTS — chỉ tháp ăng-ten + sóng, không có pin teardrop bao quanh để
+// gọn nhẹ, không che bản đồ. Đỉnh ăng-ten là điểm tham chiếu trên bản đồ
+// (MapMarker dùng anchor="bottom").
+function BtsTowerIcon({
+  size,
+  color,
+  connected,
+}: {
+  size: number;
+  color: string;
+  connected: boolean;
+}) {
+  const glow = connected
+    ? `drop-shadow(0 1px 2px rgba(15,23,42,0.3)) drop-shadow(0 0 4px ${color}AA)`
+    : "drop-shadow(0 1px 2px rgba(15,23,42,0.25))";
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      style={{ filter: glow, display: "block" }}
+    >
+      {/* Halo trắng phía sau cho dễ nhìn trên nền bản đồ */}
+      <path
+        d="M4.5 8.5C4.5 5.46 7.46 3 12 3s7.5 2.46 7.5 5.5"
+        stroke="#fff"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7 11c0-2.21 2.24-4 5-4s5 1.79 5 4"
+        stroke="#fff"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <line x1="12" y1="13" x2="12" y2="21" stroke="#fff" strokeWidth="3.5" />
+      <line x1="8" y1="21" x2="16" y2="21" stroke="#fff" strokeWidth="3.5" />
+      {/* Strokes màu chính ở trên */}
+      <path
+        d="M4.5 8.5C4.5 5.46 7.46 3 12 3s7.5 2.46 7.5 5.5"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7 11c0-2.21 2.24-4 5-4s5 1.79 5 4"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <line x1="12" y1="13" x2="12" y2="21" stroke={color} strokeWidth="2" />
+      <line x1="8" y1="21" x2="16" y2="21" stroke={color} strokeWidth="2" />
+      <circle cx="12" cy="13" r="1.5" fill={color} />
+    </svg>
   );
 }
 

@@ -21,7 +21,7 @@ import type {
   Polygon,
 } from "geojson";
 import type { MapLayerMouseEvent } from "maplibre-gl";
-import { GOONG_ATTRIBUTION, GOONG_STYLE_URL } from "@/lib/mapTiles";
+import { GOONG_ATTRIBUTION, GOONG_STYLE_URL, hidePoiLayers } from "@/lib/mapTiles";
 import { metersCircle } from "@/lib/geoCircle";
 import type { HistoryPoint, LocationQuality } from "@/types/device";
 
@@ -258,6 +258,7 @@ export default function HistoryMap({
       mapStyle={GOONG_STYLE_URL}
       style={{ width: "100%", height: "100%" }}
       attributionControl={false}
+      onLoad={(e) => hidePoiLayers(e.target)}
       onClick={handleClick}
       onMouseEnter={() => setCursor("pointer")}
       onMouseLeave={() => setCursor("")}

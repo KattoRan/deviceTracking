@@ -27,3 +27,29 @@ export const GOONG_STYLE_URL = `https://tiles.goong.io/assets/goong_map_web.json
 // thêm OpenStreetMap (raw data layer bên dưới) để khỏi credit Goong 2 lần.
 export const GOONG_ATTRIBUTION =
   '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+
+/**
+ * Ẩn các layer POI (poi-park, poi-railway, poi-airport, poi-tree, etc.)
+ * để map đỡ rối — chỉ giữ đường, label phố, tên địa danh, ranh giới hành
+ * chính. Gọi từ onLoad của <Map>.
+ *
+ * Giữ nguyên các layer `place-*` (tên thành phố, đảo, biển — bao gồm Hoàng
+ * Sa/Trường Sa) và `highway-name-*`, `river-name-*` vì đó là context cần
+ * thiết, không phải POI thương mại.
+ */
+export function hidePoiLayers(map: {
+  getStyle: () => { layers?: Array<{ id: string }> } | undefined;
+  setLayoutProperty: (layerId: string, name: string, value: unknown) => void;
+}): void {
+  const style = map.getStyle();
+  if (!style?.layers) return;
+  for (const layer of style.layers) {
+    if (layer.id.startsWith("poi-")) {
+      try {
+        map.setLayoutProperty(layer.id, "visibility", "none");
+      } catch {
+        // Layer có thể bị remove giữa lúc fire — bỏ qua.
+      }
+    }
+  }
+}
