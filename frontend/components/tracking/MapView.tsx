@@ -210,8 +210,15 @@ export default function MapView({
     const features = devices.flatMap((d) => {
       if (d.latitude == null || d.longitude == null) return [];
       const realtime = d.connectedBts;
+      // `bts_id` là trạm "last known" từ REST list, chỉ là best-guess ban đầu.
+      // Khi đã nhận `device_moved` (cellTowers !== undefined), serving cell
+      // realtime là nguồn sự thật duy nhất: nếu nó chưa resolve được trạm
+      // (connectedBts == null, ví dụ API tra trạm hết quota) thì KHÔNG vẽ về
+      // `bts_id` nữa — nếu không sẽ kẹt một đường nối tới trạm cũ mà thiết bị
+      // đã rời khỏi vùng phủ sóng. Chỉ fallback khi chưa có dữ liệu realtime.
+      const hasRealtimeCells = d.cellTowers !== undefined;
       const fallback =
-        d.bts_id != null
+        !hasRealtimeCells && d.bts_id != null
           ? geoJsonData?.features.find(
               (f) =>
                 f.properties.type === "bts" && f.properties.id === d.bts_id,
