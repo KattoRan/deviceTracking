@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import deviceService from "@/services/deviceService";
-import type { CellTowerInfo, Device, DeviceDetail } from "@/types/device";
+import type { Device, DeviceDetail } from "@/types/device";
 import RemoteControlPanel from "./RemoteControlPanel";
 
 interface DeviceDetailPanelProps {
@@ -263,19 +263,6 @@ export default function DeviceDetailPanel({
             </div>
           </Section>
 
-          {device.cellTowers && device.cellTowers.length > 0 && (
-            <Section
-              icon={Radio}
-              title={`Trạm đang kết nối (${device.cellTowers.length})`}
-            >
-              <div className="space-y-2">
-                {device.cellTowers.map((cell, i) => (
-                  <CellTowerRow key={`${cell.cid}-${cell.lac}-${i}`} cell={cell} />
-                ))}
-              </div>
-            </Section>
-          )}
-
           <div className="grid grid-cols-2 border-b border-slate-200">
             <div className="border-r border-slate-200 p-4">
               <SectionHeader icon={Clock} title="Cập nhật cuối" />
@@ -486,35 +473,3 @@ function Row({
   );
 }
 
-function CellTowerRow({ cell }: { cell: CellTowerInfo }) {
-  const signal = signalLevel(cell.signalDbm);
-  return (
-    <div
-      className={`rounded-lg border px-3 py-2.5 ${cell.isServing ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-slate-50"}`}
-    >
-      <div className="mb-1 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span
-            className={`rounded px-1.5 py-0.5 text-xs font-semibold ${cell.isServing ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}
-          >
-            {cell.type}
-          </span>
-          {cell.isServing && (
-            <span className="text-[10px] font-medium text-blue-700">Serving</span>
-          )}
-        </div>
-        <div className={`flex items-center gap-1 ${signal.color}`}>
-          <SignalBars bars={signal.bars} />
-          <span className="text-[10px]">{cell.signalDbm} dBm</span>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
-        <span>CID: {cell.cid}</span>
-        <span>LAC: {cell.lac}</span>
-        <span>MCC: {cell.mcc}</span>
-        <span>MNC: {cell.mnc}</span>
-        {cell.pci != null && <span>PCI: {cell.pci}</span>}
-      </div>
-    </div>
-  );
-}
