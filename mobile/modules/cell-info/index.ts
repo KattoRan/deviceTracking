@@ -17,8 +17,6 @@ export interface NativeCellInfo {
 
 interface CellInfoNativeModule {
   getCellInfo(): Promise<NativeCellInfo[]>;
-  /** DIAGNOSTIC (temporary): raw per-cell signal lines for on-device viewing. */
-  getCellInfoDebug(): Promise<string[]>;
 }
 
 /**

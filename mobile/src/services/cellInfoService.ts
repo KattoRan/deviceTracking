@@ -122,29 +122,6 @@ export async function getCellTowerInfo(): Promise<CellTower[]> {
   }
 }
 
-/**
- * DIAGNOSTIC (temporary): raw per-cell signal lines for on-screen display, so
- * the WCDMA -24 question can be checked without adb. Remove with the rest of
- * the diagnostic code once the signal source is decided.
- */
-export async function getCellInfoDebugLines(): Promise<string[]> {
-  const source = getCellInfoSource();
-  if (source === 'mock-expo-go')
-    return ['(Expo Go) chỉ có mock — cần dev build để đọc native'];
-  if (source === 'unavailable')
-    return ['Cell info không khả dụng trên thiết bị này (iOS / không có module)'];
-
-  if (Platform.OS === 'android') {
-    const granted = await ensurePhoneStatePermission();
-    if (!granted) return ['Chưa cấp quyền READ_PHONE_STATE'];
-  }
-  try {
-    return await CellInfoModule!.getCellInfoDebug();
-  } catch (e) {
-    return ['Lỗi đọc cell info: ' + (e instanceof Error ? e.message : String(e))];
-  }
-}
-
 export function isRealCellInfoAvailable(): boolean {
   return getCellInfoSource() === 'real';
 }
