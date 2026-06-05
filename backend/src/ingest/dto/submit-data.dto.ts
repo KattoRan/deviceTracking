@@ -65,7 +65,9 @@ export class CellTowerDto {
   @ApiProperty() @IsInt() lac: number;
   @ApiProperty() @IsInt() cid: number;
 
-  @ApiProperty() @IsNumber() signalDbm: number;
+  // Nullable: a modem may report a cell's identity but no usable signal
+  // (e.g. WCDMA with no RSCP). Such cells are still accepted for BTS lookup.
+  @ApiPropertyOptional() @IsOptional() @IsNumber() signalDbm?: number | null;
 
   @ApiPropertyOptional() @IsOptional() @IsInt() rssi?: number;
   @ApiPropertyOptional() @IsOptional() @IsInt() pci?: number;

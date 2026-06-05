@@ -87,14 +87,16 @@ const isValidDbm = (v: number | null | undefined): v is number =>
 
 function normalize(raw: NativeCellInfo): CellTower | null {
   if (!raw.mcc || !raw.mnc || !raw.lac || !raw.cid) return null;
-  if (!isValidDbm(raw.signalDbm)) return null;
+  // Keep the cell when only its signal is missing/invalid — the identity is
+  // still useful for BTS lookup. A null signal just means it can't win the
+  // serving-cell pick by strength (handled server-side).
   return {
     type: raw.type,
     mcc: raw.mcc,
     mnc: raw.mnc,
     lac: raw.lac,
     cid: raw.cid,
-    signalDbm: raw.signalDbm,
+    signalDbm: isValidDbm(raw.signalDbm) ? raw.signalDbm : null,
     rssi: isValidDbm(raw.rssi) ? raw.rssi : undefined,
     pci: raw.pci ?? undefined,
     isRegistered: raw.isRegistered,
@@ -117,6 +119,29 @@ export async function getCellTowerInfo(): Promise<CellTower[]> {
     return raw.map(normalize).filter((c): c is CellTower => c !== null);
   } catch {
     return [];
+  }
+}
+
+/**
+ * DIAGNOSTIC (temporary): raw per-cell signal lines for on-screen display, so
+ * the WCDMA -24 question can be checked without adb. Remove with the rest of
+ * the diagnostic code once the signal source is decided.
+ */
+export async function getCellInfoDebugLines(): Promise<string[]> {
+  const source = getCellInfoSource();
+  if (source === 'mock-expo-go')
+    return ['(Expo Go) chỉ có mock — cần dev build để đọc native'];
+  if (source === 'unavailable')
+    return ['Cell info không khả dụng trên thiết bị này (iOS / không có module)'];
+
+  if (Platform.OS === 'android') {
+    const granted = await ensurePhoneStatePermission();
+    if (!granted) return ['Chưa cấp quyền READ_PHONE_STATE'];
+  }
+  try {
+    return await CellInfoModule!.getCellInfoDebug();
+  } catch (e) {
+    return ['Lỗi đọc cell info: ' + (e instanceof Error ? e.message : String(e))];
   }
 }
 

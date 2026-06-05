@@ -34,7 +34,7 @@ export interface DeviceMovedEvent {
     cid: number;
     pci: number | null;
     rssi: number | null;
-    signalDbm: number;
+    signalDbm: number | null;
     isServing: boolean;
   }>;
   connectedBts: {

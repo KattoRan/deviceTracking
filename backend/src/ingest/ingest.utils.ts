@@ -5,7 +5,9 @@ export type NormalizedCell = CellTowerDto & { isServing: boolean };
 export function isValidCell(c: CellTowerDto): boolean {
   if (!c.mcc || !c.mnc || !c.lac || !c.cid) return false;
   if (c.cid <= 0) return false;
-  if (!c.signalDbm) return false;
+  // Signal is optional: a valid identity is enough to resolve the BTS. Some
+  // modems report a cell (e.g. WCDMA) with no usable RSCP — we keep it but it
+  // can't win the serving-cell pick by strength (see markServingCell).
   return true;
 }
 
@@ -33,11 +35,18 @@ export function markServingCell(cells: CellTowerDto[]): NormalizedCell[] {
   const registered = cells.filter((c) => c.isRegistered === true);
   const pool = registered.length > 0 ? registered : cells;
 
-  let bestIndex = -1;
-  let bestDbm = -Infinity;
+  // Cells with no usable signal (null/undefined — e.g. WCDMA without RSCP)
+  // rank as the weakest so a cell with a real reading always wins. When the
+  // whole pool lacks a reading (3G-only device on such a modem), default to
+  // the first pooled cell so a serving cell is still chosen.
+  const sig = (c: CellTowerDto) =>
+    typeof c.signalDbm === 'number' ? c.signalDbm : -Infinity;
+
+  let bestIndex = cells.indexOf(pool[0]);
+  let bestDbm = sig(pool[0]);
   pool.forEach((c) => {
-    if (c.signalDbm > bestDbm) {
-      bestDbm = c.signalDbm;
+    if (sig(c) > bestDbm) {
+      bestDbm = sig(c);
       bestIndex = cells.indexOf(c);
     }
   });

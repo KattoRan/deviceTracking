@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import android.telephony.CellInfo
 import android.telephony.CellInfoGsm
 import android.telephony.CellInfoLte
@@ -18,6 +19,10 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class CellInfoModule : Module() {
+  private companion object {
+    const val TAG = "CellInfoDiag" // diagnostic logcat tag; see logRawSignal
+  }
+
   override fun definition() = ModuleDefinition {
     Name("CellInfoModule")
 
@@ -38,7 +43,72 @@ class CellInfoModule : Module() {
         return@getCellInfo emptyList<Map<String, Any?>>()
       }
 
+      // DIAGNOSTIC (temporary): also dump raw signal fields to logcat for
+      // anyone with adb. The same lines are returned by getCellInfoDebug below
+      // for on-device viewing. Remove once the WCDMA signal source is decided.
+      all.forEach { Log.d(TAG, describeSignal(it)) }
+
       all.mapNotNull { info -> info.toMap() }
+    }
+
+    // DIAGNOSTIC (temporary) — returns the raw per-cell signal lines so the app
+    // can show them on-screen (no adb needed). Delete with the rest of the
+    // diagnostic code once the WCDMA signal source is decided.
+    AsyncFunction("getCellInfoDebug") getCellInfoDebug@{
+      val context = appContext.reactContext
+        ?: return@getCellInfoDebug listOf("ERROR: react context lost")
+      if (!hasRequiredPermissions(context)) {
+        return@getCellInfoDebug listOf("ERROR: thiếu quyền vị trí (ACCESS_FINE_LOCATION)")
+      }
+      val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        ?: return@getCellInfoDebug listOf("ERROR: không có TelephonyManager")
+      val all: List<CellInfo> = try {
+        tm.allCellInfo ?: emptyList()
+      } catch (_: SecurityException) {
+        return@getCellInfoDebug listOf("ERROR: SecurityException khi đọc cell info")
+      }
+      val lines = ArrayList<String>()
+      lines.add("API=${Build.VERSION.SDK_INT}  số cell đọc được=${all.size}")
+      all.forEach { lines.add(describeSignal(it)) }
+      lines
+    }
+  }
+
+  // DIAGNOSTIC ONLY — formats the raw signal getters for one cell. `toString()`
+  // dumps the modem's internal fields (ss/rscp/ecno/...). Safe (read-only);
+  // delete together with the call sites above when no longer needed.
+  private fun describeSignal(info: CellInfo): String {
+    return try {
+      val q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+      val r = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+      when (info) {
+        is CellInfoWcdma -> {
+          val s = info.cellSignalStrength
+          // NB: getDbm() IS the RSCP for WCDMA; there is no public getRscp().
+          "WCDMA cid=${info.cellIdentity.cid} reg=${info.isRegistered} " +
+            "dbm=${s.dbm} asu=${s.asuLevel} lvl=${s.level} " +
+            "ecNo=${if (r) s.ecNo.toString() else "n/a"}\n   raw=$s"
+        }
+        is CellInfoLte -> {
+          val s = info.cellSignalStrength
+          "LTE cid=${info.cellIdentity.ci} reg=${info.isRegistered} " +
+            "dbm=${s.dbm} asu=${s.asuLevel} lvl=${s.level} " +
+            "rsrp=${if (q) s.rsrp.toString() else "n/a"} " +
+            "rssi=${if (q) s.rssi.toString() else "n/a"}\n   raw=$s"
+        }
+        is CellInfoGsm -> {
+          val s = info.cellSignalStrength
+          "GSM cid=${info.cellIdentity.cid} reg=${info.isRegistered} " +
+            "dbm=${s.dbm} asu=${s.asuLevel} lvl=${s.level}"
+        }
+        is CellInfoNr -> {
+          val s = info.cellSignalStrength
+          "NR reg=${info.isRegistered} dbm=${s.dbm} asu=${s.asuLevel} lvl=${s.level}"
+        }
+        else -> "OTHER ${info.javaClass.simpleName} reg=${info.isRegistered}"
+      }
+    } catch (e: Throwable) {
+      "describeSignal failed: ${e.message}"
     }
   }
 
@@ -93,8 +163,12 @@ class CellInfoModule : Module() {
         "lac" to id.lac.orNullIfInvalid(),
         "cid" to id.cid.orNullIfInvalid(),
         "pci" to id.psc.orNullIfInvalid(),
-        "rssi" to s.dbm.dbmOrNull(),
-        "signalDbm" to s.dbm.dbmOrNull(),
+        // getDbm() = RSCP for WCDMA. Many modems don't measure it and report
+        // the AOSP ceiling (WCDMA_RSCP_MAX = -24) as a "no data" sentinel —
+        // which then masquerades as the strongest possible signal and wins
+        // serving-cell selection. Reject it: real RSCP is <= ~-40.
+        "rssi" to s.dbm.wcdmaDbmOrNull(),
+        "signalDbm" to s.dbm.wcdmaDbmOrNull(),
         "isRegistered" to isRegistered,
       )
     }
@@ -135,4 +209,10 @@ class CellInfoModule : Module() {
   // We keep the window loose so future radios still pass.
   private fun Int.dbmOrNull(): Int? =
     if (this == Int.MAX_VALUE || this >= 0 || this < -160) null else this
+
+  // WCDMA-only: also reject the RSCP ceiling sentinel (>= -25, i.e. the AOSP
+  // WCDMA_RSCP_MAX = -24 returned when the modem reports no real RSCP). Real
+  // RSCP is always <= ~-40, so this never drops a genuine reading.
+  private fun Int.wcdmaDbmOrNull(): Int? =
+    if (this >= -25) null else this.dbmOrNull()
 }

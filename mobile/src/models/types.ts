@@ -60,7 +60,9 @@ export interface CellTower {
   mnc: number;
   lac: number;
   cid: number;
-  signalDbm: number;
+  /** null when the modem reports the cell's identity but no usable signal
+   *  (e.g. WCDMA RSCP unavailable). The cell is still sent for BTS lookup. */
+  signalDbm: number | null;
   rssi?: number;
   pci?: number;
   /**
