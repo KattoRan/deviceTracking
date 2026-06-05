@@ -32,10 +32,7 @@ import {
   startBackgroundLocation,
   stopBackgroundLocation,
 } from '../services/backgroundLocationService';
-import {
-  getCellInfoDebugLines,
-  getCellTowerInfo,
-} from '../services/cellInfoService';
+import { getCellTowerInfo } from '../services/cellInfoService';
 import {
   connectMqtt,
   disconnectMqtt,
@@ -75,9 +72,6 @@ export default function TrackingScreen() {
     state: 'success' | 'error';
     message: string;
   } | null>(null);
-  // DIAGNOSTIC (temporary): raw cell signal lines shown on-screen.
-  const [debugLines, setDebugLines] = useState<string[] | null>(null);
-  const [debugLoading, setDebugLoading] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -421,21 +415,11 @@ export default function TrackingScreen() {
     });
   }, [parentContact?.phoneNumber]);
 
-  // DIAGNOSTIC (temporary): read raw cell signal fields for on-screen display.
-  const handleReadSignals = useCallback(async () => {
-    setDebugLoading(true);
-    try {
-      setDebugLines(await getCellInfoDebugLines());
-    } finally {
-      setDebugLoading(false);
-    }
-  }, []);
-
   return (
     <View style={{ flex: 1 }}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { flexGrow: 1 }]}
       >
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Thông tin liên lạc</Text>
@@ -466,6 +450,32 @@ export default function TrackingScreen() {
               )}
             </>
           )}
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.headerRow}>
+            <Text style={styles.cardTitle}>Theo dõi thời gian thực</Text>
+            <View
+              style={[
+                styles.badge,
+                isActive ? styles.badgeActive : styles.badgeIdle,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.badgeText,
+                  isActive ? styles.badgeTextActive : styles.badgeTextIdle,
+                ]}
+              >
+                {isActive ? 'Đang chạy' : 'Tạm dừng'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.placeholder}>
+            {isActive
+              ? `Đang gửi vị trí mỗi ${Math.round(intervalMs / 1000)} giây khi mở ứng dụng.`
+              : 'Mở ứng dụng để tiếp tục gửi vị trí thời gian thực.'}
+          </Text>
         </View>
 
         <View style={styles.card}>
@@ -510,60 +520,27 @@ export default function TrackingScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* DIAGNOSTIC (temporary): raw cell signal fields. Remove later. */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Chẩn đoán tín hiệu trạm</Text>
-          <Text style={styles.placeholder}>
-            Đọc field sóng thô từ modem. Xem WCDMA dbm/asu/rscp có biến thiên
-            khi đổi trạm hay luôn cố định (-24).
-          </Text>
-          <TouchableOpacity
-            style={[styles.toggleBtn, styles.startBtn]}
-            onPress={handleReadSignals}
-            activeOpacity={0.7}
-            disabled={debugLoading}
-          >
-            {debugLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.toggleText}>Đọc tín hiệu trạm</Text>
-            )}
-          </TouchableOpacity>
-          {debugLines && (
-            <View style={styles.debugBox}>
-              {debugLines.length === 0 ? (
-                <Text style={styles.debugLine}>(không có cell nào)</Text>
-              ) : (
-                debugLines.map((line, i) => (
-                  <Text key={i} style={styles.debugLine} selectable>
-                    {line}
-                  </Text>
-                ))
-              )}
-            </View>
-          )}
-        </View>
-
         {locationError && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{locationError}</Text>
           </View>
         )}
+
+        <SosButton
+          deviceId={storedData?.deviceId ?? null}
+          lastKnown={
+            location
+              ? {
+                  lat: location.latitude,
+                  lon: location.longitude,
+                  accuracy: location.accuracy,
+                }
+              : null
+          }
+          onResult={(state, message) => setSosResult({ state, message })}
+        />
       </ScrollView>
 
-      <SosButton
-        deviceId={storedData?.deviceId ?? null}
-        lastKnown={
-          location
-            ? {
-                lat: location.latitude,
-                lon: location.longitude,
-                accuracy: location.accuracy,
-              }
-            : null
-        }
-        onResult={(state, message) => setSosResult({ state, message })}
-      />
       {sosResult && (
         <View
           style={[
@@ -597,18 +574,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cardTitle: { fontSize: 18, fontWeight: '700', color: '#333', marginBottom: 12 },
-  debugBox: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: '#1E1E1E',
-  },
-  debugLine: {
-    color: '#9CDCFE',
-    fontSize: 11,
-    fontFamily: 'monospace',
-    marginBottom: 6,
-  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
