@@ -17,7 +17,7 @@ import { useGeofenceAlerts } from "@/components/GeofenceAlerts";
 import deviceService from "@/services/deviceService";
 import btsService, { type MapBounds } from "@/services/btsService";
 import geofenceService from "@/services/geofenceService";
-import type { BtsGeoJson } from "@/types/bts";
+import type { BtsFeature, BtsGeoJson } from "@/types/bts";
 import type {
   Device,
   DeviceHeartbeatEvent,
@@ -79,6 +79,38 @@ function TrackingPageInner() {
   const [showGeofences, setShowGeofences] = useState(true);
 
   const handleDeviceMoved = useCallback((event: DeviceMovedEvent) => {
+    if (event.connectedBts) {
+      const newFeature: BtsFeature = {
+        type: "Feature",
+        geometry: {
+          type: 'Point',
+          coordinates: [event.connectedBts.lon, event.connectedBts.lat] as [number, number],
+        },
+        properties: {
+          id: event.connectedBts.id,
+          type: 'bts',
+          radio: event.connectedBts.radio,
+          coverageRadius: event.connectedBts.range,
+        },
+      };
+
+      setGeoJsonData((prev) => {
+        if (prev?.features.some((f) => f.properties.id === event.connectedBts!.id)) {
+          return prev;
+        }
+        if (!prev) {
+          return {
+            type: 'FeatureCollection',
+            features: [newFeature],
+          };
+        }
+        return {
+          ...prev,
+          features: [...prev.features, newFeature],
+        };
+      });
+    }
+
     const patch: Partial<Device> = {
       latitude: event.lat,
       longitude: event.lon,
