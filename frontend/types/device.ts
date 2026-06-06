@@ -138,6 +138,17 @@ export interface LocationHistory {
   points: HistoryPoint[];
 }
 
+/**
+ * Socket.IO `device_heartbeat` event — bắn khi mobile báo "còn sống" mà
+ * không kèm fix GPS mới. UI dùng để refresh `last_seen` + clear trạng thái
+ * offline mà KHÔNG đụng vào lat/lon (tránh đè marker bằng dữ liệu cũ).
+ */
+export interface DeviceHeartbeatEvent {
+  deviceId: string;
+  batteryLevel: number | null;
+  timestamp: string;
+}
+
 /** Socket.IO `device_moved` event payload (from backend EventsGateway). */
 export interface DeviceMovedEvent {
   deviceId: string;

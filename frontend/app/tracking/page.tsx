@@ -18,7 +18,11 @@ import deviceService from "@/services/deviceService";
 import btsService, { type MapBounds } from "@/services/btsService";
 import geofenceService from "@/services/geofenceService";
 import type { BtsGeoJson } from "@/types/bts";
-import type { Device, DeviceMovedEvent } from "@/types/device";
+import type {
+  Device,
+  DeviceHeartbeatEvent,
+  DeviceMovedEvent,
+} from "@/types/device";
 import type { GeofenceListItem } from "@/types/geofence";
 
 const MapView = dynamic(() => import("@/components/tracking/MapView"), {
@@ -94,7 +98,24 @@ function TrackingPageInner() {
       prev && prev.id === event.deviceId ? { ...prev, ...patch } : prev,
     );
   }, []);
-  useSocket(handleDeviceMoved);
+  // Heartbeat: device đứng yên không gửi fix mới. Chỉ refresh last_seen +
+  // status + pin — KHÔNG đụng vào lat/lon/cellTowers/connectedBts để marker
+  // không bị "nhấp nháy" về tọa độ cũ trong khi metadata realtime vẫn đang
+  // hiển thị từ device_moved gần nhất.
+  const handleDeviceHeartbeat = useCallback((event: DeviceHeartbeatEvent) => {
+    const patch: Partial<Device> = {
+      last_seen: event.timestamp,
+      status: "online",
+    };
+    if (event.batteryLevel != null) patch.last_battery = event.batteryLevel;
+    setDevices((prev) =>
+      prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
+    );
+    setSelectedDevice((prev) =>
+      prev && prev.id === event.deviceId ? { ...prev, ...patch } : prev,
+    );
+  }, []);
+  useSocket(handleDeviceMoved, handleDeviceHeartbeat);
 
   // Derive trạng thái offline từ socket dùng chung. Trước đây trang chỉ nghe
   // `device_moved`, nên khi cron mark device offline marker vẫn "đang hoạt

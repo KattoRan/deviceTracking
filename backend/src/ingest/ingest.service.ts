@@ -10,6 +10,7 @@ import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { HeartbeatDto } from './dto/heartbeat.dto';
 import { LocationDto, SubmitDataDto } from './dto/submit-data.dto';
 import {
   ConcurrencyQueue,
@@ -211,6 +212,110 @@ export class IngestService {
     }
 
     return { success: true, message: 'Data received' };
+  }
+
+  /**
+   * Heartbeat — device còn sống nhưng không có fix GPS mới.
+   *
+   * Khác với saveData:
+   *   - KHÔNG insert location_history / cell_tower_history
+   *   - KHÔNG chạy geofence eval (không có toạ độ mới để check)
+   *   - KHÔNG broadcast device_moved (FE dùng device_heartbeat riêng để
+   *     refresh last_seen mà không phải overwrite lat/lon)
+   *
+   * Vẫn làm:
+   *   - Cập nhật devices.last_seen + last_battery
+   *   - Low-battery arm/disarm transition + push như ingest
+   *   - Clear is_offline_alerted (device vừa thở → online lại)
+   *   - Emit battery_update cho dashboard meter
+   *   - Emit device_heartbeat cho FE update UI
+   */
+  async heartbeat(
+    deviceId: string,
+    dto: HeartbeatDto,
+  ): Promise<{ success: true }> {
+    if (!deviceId) throw new BadRequestException('Missing device id');
+
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: {
+        id: true,
+        person_name: true,
+        parent_account_id: true,
+        is_low_battery_alerted: true,
+        is_offline_alerted: true,
+      },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+
+    const batteryLevel = dto.batteryLevel;
+    const now = new Date();
+    const LOW_BATTERY_THRESHOLD = 20;
+    const LOW_BATTERY_RESET_THRESHOLD = 25;
+
+    let lowBatteryTransition: 'arm' | 'disarm' | null = null;
+    if (batteryLevel != null) {
+      if (
+        batteryLevel < LOW_BATTERY_THRESHOLD &&
+        !device.is_low_battery_alerted
+      ) {
+        lowBatteryTransition = 'arm';
+      } else if (
+        batteryLevel >= LOW_BATTERY_RESET_THRESHOLD &&
+        device.is_low_battery_alerted
+      ) {
+        lowBatteryTransition = 'disarm';
+      }
+    }
+
+    const updateData: {
+      last_seen: Date;
+      last_battery?: number;
+      is_low_battery_alerted?: boolean;
+      is_offline_alerted?: boolean;
+    } = { last_seen: now };
+    if (batteryLevel != null) updateData.last_battery = batteryLevel;
+    if (lowBatteryTransition === 'arm') updateData.is_low_battery_alerted = true;
+    else if (lowBatteryTransition === 'disarm')
+      updateData.is_low_battery_alerted = false;
+    if (device.is_offline_alerted) updateData.is_offline_alerted = false;
+
+    await this.prisma.devices.update({
+      where: { id: deviceId },
+      data: updateData,
+    });
+
+    this.eventsGateway.emitDeviceHeartbeat({
+      deviceId,
+      batteryLevel: batteryLevel ?? null,
+      timestamp: now.toISOString(),
+    });
+
+    if (batteryLevel != null) {
+      this.eventsGateway.emitBatteryUpdate({
+        deviceId,
+        batteryLevel,
+        timestamp: now.toISOString(),
+      });
+    }
+    if (lowBatteryTransition === 'arm' && batteryLevel != null) {
+      const lowEvent = {
+        deviceId,
+        deviceName: device.person_name,
+        batteryLevel,
+        timestamp: now.toISOString(),
+      };
+      this.eventsGateway.emitLowBattery(lowEvent);
+      void this.alerts.dispatchLowBatteryPush(
+        device.parent_account_id,
+        lowEvent,
+      );
+      this.logger.warn(
+        `Low battery (heartbeat) device=${deviceId} (${device.person_name ?? '?'}) ${batteryLevel}%`,
+      );
+    }
+
+    return { success: true };
   }
 
   /**

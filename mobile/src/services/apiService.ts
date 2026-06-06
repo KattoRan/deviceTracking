@@ -1,6 +1,7 @@
 import { API_BASE_URL, API_ENDPOINTS, REQUEST_TIMEOUT_MS } from '../config/api';
 import type {
   GeofenceBreachEvent,
+  HeartbeatPayload,
   IngestPayload,
   IngestResponse,
   PairDeviceRequest,
@@ -90,6 +91,17 @@ export function sendIngestData(
   payload: IngestPayload,
 ): Promise<IngestResponse> {
   return request<IngestResponse>(API_ENDPOINTS.INGEST, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    headers: { 'x-device-id': deviceId },
+  });
+}
+
+export function sendHeartbeat(
+  deviceId: string,
+  payload: HeartbeatPayload,
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(API_ENDPOINTS.HEARTBEAT, {
     method: 'POST',
     body: JSON.stringify(payload),
     headers: { 'x-device-id': deviceId },

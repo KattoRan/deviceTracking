@@ -75,8 +75,9 @@ export interface CellTower {
 
 export interface IngestPayload {
   // Trajectory of fixes accumulated during one send window, ordered oldest
-  // → newest. Always at least one element — when the watcher produced no
-  // fresh fix in the window we resend the last known one as heartbeat.
+  // → newest. Always at least one element — empty windows go through
+  // `sendHeartbeat` instead so the server doesn't pollute location_history
+  // with duplicate stationary fixes.
   locations: LocationData[];
   cellTowers: CellTower[];
   /** Pin thiết bị (0-100), nếu lấy được. */
@@ -86,6 +87,15 @@ export interface IngestPayload {
 export interface IngestResponse {
   success: boolean;
   message?: string;
+}
+
+/**
+ * Tín hiệu "còn sống" khi watcher không emit fix mới trong cửa sổ gửi.
+ * Server chỉ refresh `last_seen` + `last_battery`, không insert
+ * `location_history` → bảng lịch sử không phình ra theo từng tick đứng yên.
+ */
+export interface HeartbeatPayload {
+  batteryLevel?: number;
 }
 
 export interface CellTowerInfoRealtime extends CellTower {

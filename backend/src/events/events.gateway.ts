@@ -123,6 +123,17 @@ export interface BatteryUpdateEvent {
   timestamp: string;
 }
 
+/**
+ * Bắn khi mobile gọi /ingest/heartbeat — device còn sống nhưng KHÔNG có fix
+ * GPS mới. Dashboard dùng event này để refresh `last_seen` và dọn trạng thái
+ * offline mà không phải nhận lại tọa độ y nguyên cũ qua `device_moved`.
+ */
+export interface DeviceHeartbeatEvent {
+  deviceId: string;
+  batteryLevel: number | null;
+  timestamp: string;
+}
+
 /** Room name a device joins to receive its own commands. */
 function deviceRoom(deviceId: string): string {
   return `device:${deviceId}`;
@@ -265,5 +276,9 @@ export class EventsGateway
 
   emitBatteryUpdate(event: BatteryUpdateEvent) {
     this.server.emit('battery_update', event);
+  }
+
+  emitDeviceHeartbeat(event: DeviceHeartbeatEvent) {
+    this.server.emit('device_heartbeat', event);
   }
 }

@@ -25,6 +25,7 @@ import type {
 import {
   fetchParentContact,
   fetchTrackingInterval,
+  sendHeartbeat,
   sendIngestData,
 } from '../services/apiService';
 import {
@@ -36,6 +37,7 @@ import { getCellTowerInfo } from '../services/cellInfoService';
 import {
   connectMqtt,
   disconnectMqtt,
+  publishHeartbeat,
   publishTelemetry,
 } from '../services/mqttService';
 import {
@@ -127,18 +129,6 @@ export default function TrackingScreen() {
         const batch = bufferRef.current;
         bufferRef.current = [];
 
-        // Heartbeat fallback — no fresh fix in this window, but we still want
-        // the server to see the device is alive.
-        const locations =
-          batch.length > 0
-            ? batch
-            : lastKnownRef.current
-              ? [lastKnownRef.current]
-              : [];
-
-        if (locations.length === 0) return null;
-
-        const towers = await getCellTowerInfo();
         let batteryLevel: number | undefined;
         try {
           const lvl = await Battery.getBatteryLevelAsync();
@@ -146,8 +136,22 @@ export default function TrackingScreen() {
         } catch {
           // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
         }
+
+        // Watcher im lặng cả cửa sổ này (user đứng yên). Bắn heartbeat thay
+        // vì resend fix cũ — server chỉ refresh last_seen, không tạo row
+        // location_history trùng tọa độ + cùng timestamp.
+        if (batch.length === 0) {
+          const hb = { batteryLevel };
+          const sentOverMqtt = await publishHeartbeat(storedData.deviceId, hb);
+          if (!sentOverMqtt) {
+            await sendHeartbeat(storedData.deviceId, hb);
+          }
+          return null;
+        }
+
+        const towers = await getCellTowerInfo();
         const payload: IngestPayload = {
-          locations,
+          locations: batch,
           cellTowers: towers,
           batteryLevel,
         };
@@ -157,7 +161,7 @@ export default function TrackingScreen() {
           await sendIngestData(storedData.deviceId, payload);
         }
 
-        return locations[locations.length - 1];
+        return batch[batch.length - 1];
       } catch {
         // network / GPS errors are non-fatal — the next tick will retry
         return null;
