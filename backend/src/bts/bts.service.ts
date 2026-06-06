@@ -10,14 +10,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { MapQueryDto } from './dto/map-query.dto';
 
-interface UnwiredLabsResponse {
-  status?: 'ok' | 'error';
-  lat?: number;
-  lon?: number;
+interface CombainResponse {
+  location?: { lat?: number; lng?: number };
   accuracy?: number;
-  range?: number;
-  address?: string;
-  message?: string;
+  logId?: number;
+  error?: { code?: number; message?: string };
 }
 
 interface ClusterRow {
@@ -37,14 +34,13 @@ interface BtsRow {
 const CACHE_TTL_SECONDS = 60;
 const RAW_LIMIT = 2000;
 const CLUSTER_LIMIT = 5000;
-const UNWIRED_LABS_URL = 'https://us1.unwiredlabs.com/v2/process.php';
 
 @Injectable()
 export class BtsService {
   private readonly logger = new Logger(BtsService.name);
 
   /** Dedup in-flight lookups so concurrent telemetry for the same cell only
-   *  hits UnwiredLabs once — saves quota and avoids unique-constraint races. */
+   *  hits Combain once — saves quota and avoids unique-constraint races. */
   private readonly inflight = new Map<
     string,
     Promise<Awaited<ReturnType<BtsService['fetchAndInsert']>>>
@@ -85,40 +81,59 @@ export class BtsService {
     cid: number,
     radio: string,
   ) {
-    const token = process.env.OPENCELLID_API_KEY;
-    if (!token) {
-      this.logger.debug('OPENCELLID_API_KEY missing — skip lookup');
+    const key = process.env.COMBAIN_API_KEY;
+    const combainUrl = process.env.COMBAIN_URL;
+    if (!key) {
+      this.logger.debug('COMBAIN_API_KEY missing — skip lookup');
+      return null;
+    }
+    if (!combainUrl) {
+      this.logger.debug('COMBAIN_URL missing — skip lookup');
       return null;
     }
 
-    let data: UnwiredLabsResponse;
+    let data: CombainResponse;
     try {
-      const res = await axios.post<UnwiredLabsResponse>(
-        UNWIRED_LABS_URL,
-        { token, radio, mcc, mnc, cells: [{ lac, cid }], address: 1 },
-        { timeout: 8000 },
+      const res = await axios.post<CombainResponse>(
+        combainUrl,
+        {
+          radioType: radio,
+          cellTowers: [
+            {
+              mobileCountryCode: mcc,
+              mobileNetworkCode: mnc,
+              locationAreaCode: lac,
+              cellId: cid,
+            },
+          ],
+        },
+        { params: { key }, timeout: 8000 },
       );
       data = res.data;
     } catch (err) {
       this.logger.warn(
-        `UnwiredLabs request ${mcc}-${mnc}-${lac}-${cid} failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Combain request ${mcc}-${mnc}-${lac}-${cid} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }
 
-    if (data.status !== 'ok' || data.lat == null || data.lon == null) {
+    const lat = data.location?.lat;
+    const lng = data.location?.lng;
+    if (data.error || lat == null || lng == null) {
       this.logger.warn(
-        `UnwiredLabs no fix for ${mcc}-${mnc}-${lac}-${cid}: ${data.message ?? 'no data'}`,
+        `Combain no fix for ${mcc}-${mnc}-${lac}-${cid}: ${data.error?.message ?? 'no data'}`,
       );
       return null;
     }
 
     // The `set_geom` trigger auto-populates `geom` from lat/lon on INSERT.
     // Raw SQL with ON CONFLICT is atomic — Prisma's upsert isn't and races
-    // with other queue workers reading the same cell.
+    // with other queue workers reading the same cell. Combain returns
+    // `accuracy` (estimated error radius), not coverage range, and no
+    // address — the address column stays null for rows ingested this way.
     await this.prisma.$executeRaw`
       INSERT INTO bts_stations (mcc, mnc, lac, cid, lat, lon, radio, range, address)
-      VALUES (${mcc}, ${mnc}, ${lac}, ${cid}, ${data.lat}, ${data.lon}, ${radio}, ${data.accuracy ?? data.range ?? 0}, ${data.address ?? null})
+      VALUES (${mcc}, ${mnc}, ${lac}, ${cid}, ${lat}, ${lng}, ${radio}, ${data.accuracy ?? 0}, ${null})
       ON CONFLICT (mcc, mnc, lac, cid) DO NOTHING;
     `;
 
