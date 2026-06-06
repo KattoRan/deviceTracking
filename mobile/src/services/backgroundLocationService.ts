@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Battery from 'expo-battery';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { Platform, Vibration } from 'react-native';
+import { Vibration } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
@@ -138,7 +138,7 @@ interface TaskData {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Background command polling (hướng A trong design).
+// Background command polling.
 //
 // Khi app foreground, socket.io nhận command realtime qua App.tsx/TrackingScreen.
 // Khi app background, JS runtime bị OS suspend → socket disconnect → command
@@ -148,10 +148,10 @@ interface TaskData {
 // stop background…), rồi POST kết quả về.
 //
 // Trade-off đã chấp nhận:
-//   - Trễ tối đa = chu kỳ GPS update (~30s nếu đang di chuyển, vô tận nếu
-//     đứng yên — distanceInterval=20m chặn task fire).
-//   - Server vẫn dùng cron timeout 30s để mark command failed. Nếu trẻ đứng
-//     yên quá lâu → command timeout trước khi poll tới → web báo failed.
+//   - Trễ tối đa ~30s (timeInterval). distanceInterval=0 + pausesUpdates
+//     Automatically=false buộc OS wake task đều mỗi 30s bất kể di chuyển
+//     hay không, nên command poll cũng chạy đều theo nhịp đó.
+//   - Server cron timeout 30s vẫn an toàn vì task luôn poll trong cửa sổ đó.
 //   - request_location_now hoạt động vì location vừa nhận đã ở buffer; ta
 //     chỉ cần force-flush ngay thay vì chờ FLUSH_INTERVAL_MS.
 //   - toggle_tracking(enabled=true) ở background không khả thi (foreground
@@ -293,6 +293,40 @@ async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
 }
 
 /**
+ * Headless heartbeat — gọi khi task fire nhưng buffer rỗng (user đứng yên
+ * hoặc mọi fix bị filter accuracy). Dashboard cha mẹ vẫn thấy `last_seen`
+ * và pin cập nhật đều thay vì "treo" 5-10 phút như flow cũ.
+ */
+async function sendHeartbeatInBackground(
+  deviceId: string,
+  force: boolean,
+): Promise<void> {
+  if (!(await shouldFlushNow(force))) return;
+
+  let batteryLevel: number | undefined;
+  try {
+    const lvl = await Battery.getBatteryLevelAsync();
+    batteryLevel = Math.round(lvl * 100);
+  } catch {
+    // ignore — battery API có thể không có ở simulator
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.HEARTBEAT}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-device-id': deviceId,
+      },
+      body: JSON.stringify({ batteryLevel }),
+    });
+    if (res.ok) await markFlushed();
+  } catch {
+    // Network fail — lần fire tiếp theo sẽ thử lại.
+  }
+}
+
+/**
  * Đăng ký TaskManager task ở module level — bắt buộc với background mode,
  * vì khi OS đánh thức app trong nền, RN sẽ load module này nhưng KHÔNG
  * render React tree. Hàm này phải tồn tại trước khi
@@ -303,14 +337,13 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     console.warn('[bg-location] task error:', error);
     return;
   }
-  const payload = data as TaskData | undefined;
-  if (!payload?.locations?.length) return;
 
   const deviceId = await loadStoredDeviceId();
   if (!deviceId) return; // chưa pair → không gửi
 
+  const payload = data as TaskData | undefined;
   const fixes: BufferedFix[] = [];
-  for (const loc of payload.locations) {
+  for (const loc of payload?.locations ?? []) {
     const acc = loc.coords.accuracy ?? null;
     if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) continue;
     fixes.push({
@@ -328,7 +361,19 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   // Poll command TRƯỚC khi flush — request_location_now sẽ trả needFlush
   // = true để force gửi buffer ngay, bỏ qua throttle 30s.
   const force = await pollAndExecuteCommands(deviceId);
-  await flushBufferIfNeeded(deviceId, { force });
+
+  // Với distanceInterval=0, OS đánh thức đều mỗi 30s kể cả khi user đứng
+  // yên — buffer có thể vẫn rỗng (không fix mới + mọi fix cũ đã flush, hoặc
+  // batch này bị filter sạch vì accuracy). Bắn heartbeat để cha mẹ thấy
+  // device còn sống, giống flow foreground (TrackingScreen.tsx:143-150).
+  const bufferRaw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
+  const bufferEmpty =
+    !bufferRaw || (JSON.parse(bufferRaw) as BufferedFix[]).length === 0;
+  if (bufferEmpty) {
+    await sendHeartbeatInBackground(deviceId, force);
+  } else {
+    await flushBufferIfNeeded(deviceId, { force });
+  }
 });
 
 export async function startBackgroundLocation(): Promise<{
@@ -355,7 +400,10 @@ export async function startBackgroundLocation(): Promise<{
 
   await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
-    distanceInterval: 20,
+    // distanceInterval=0: OS wake task theo timeInterval bất kể di chuyển hay
+    // không. Yêu cầu nghiệp vụ: cha mẹ phải thấy thiết bị "còn sống" liên tục
+    // (last_seen, pin) ngay cả lúc trẻ ngồi yên một chỗ.
+    distanceInterval: 0,
     timeInterval: 30_000,
     deferredUpdatesInterval: 30_000,
     showsBackgroundLocationIndicator: true,
@@ -366,9 +414,10 @@ export async function startBackgroundLocation(): Promise<{
       notificationColor: '#1976D2',
       killServiceOnDestroy: false,
     },
-    // iOS: pauses automatically when stationary; the heartbeat fallback in
-    // TrackingScreen tiếp tục bắn realtime payload trong foreground.
-    pausesUpdatesAutomatically: Platform.OS === 'ios',
+    // Đặt false trên cả iOS lẫn Android: nếu để iOS auto-pause khi user
+    // ngồi xe chạy đều / đứng yên, task ngừng fire → cha mẹ thấy thiết bị
+    // "treo". Đánh đổi ~3-5% pin/giờ lấy update liên tục.
+    pausesUpdatesAutomatically: false,
     activityType: Location.ActivityType.OtherNavigation,
   });
   return { ok: true };
