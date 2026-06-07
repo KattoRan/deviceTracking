@@ -125,13 +125,34 @@ export interface BatteryUpdateEvent {
 
 /**
  * Bắn khi mobile gọi /ingest/heartbeat — device còn sống nhưng KHÔNG có fix
- * GPS mới. Dashboard dùng event này để refresh `last_seen` và dọn trạng thái
- * offline mà không phải nhận lại tọa độ y nguyên cũ qua `device_moved`.
+ * GPS mới (mất GPS hoặc đứng yên không ra fix). Dashboard dùng event này để:
+ *   - Refresh `last_seen` và dọn trạng thái offline (KHÔNG đụng lat/lon marker).
+ *   - Cập nhật realtime "đang nối trạm nào" qua `cellTowers` + `connectedBts`,
+ *     giúp cha mẹ biết vùng phủ sóng hiện tại dù marker đứng yên ở fix GPS cuối.
+ *   - Đếm thời gian từ fix GPS cuối → hiển thị badge "GPS mất N phút".
  */
 export interface DeviceHeartbeatEvent {
   deviceId: string;
   batteryLevel: number | null;
   timestamp: string;
+  cellTowers: Array<{
+    type: string;
+    mcc: number;
+    mnc: number;
+    lac: number;
+    cid: number;
+    pci: number | null;
+    rssi: number | null;
+    signalDbm: number | null;
+    isServing: boolean;
+  }>;
+  connectedBts: {
+    id: number;
+    lat: number;
+    lon: number;
+    radio: string | null;
+    range: number | null;
+  } | null;
 }
 
 /** Room name a device joins to receive its own commands. */

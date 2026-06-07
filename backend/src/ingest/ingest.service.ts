@@ -240,38 +240,47 @@ export class IngestService {
   ): Promise<{ success: true }> {
     if (!deviceId) throw new BadRequestException('Missing device id');
 
-    // Cell-based fallback: khi mobile mất GPS hoàn toàn (buffer rỗng cả
-    // cửa sổ gửi), nó đính kèm cellTowers vào heartbeat. Server thử
-    // Combain triangulate → nếu được fix thì tạo synthetic `network`-tier
-    // location và đẩy qua saveData() như fix thường (persist
-    // location_history, emit device_moved, …). Geofence eval tự skip vì
-    // quality !== 'gps'. Combain fail (no key, no fix, network error) →
-    // rơi xuống heartbeat semantics gốc bên dưới.
+    // Resolve serving cell + connectedBts từ payload heartbeat. KHÔNG gọi
+    // Combain locate — toạ độ trạm đã có sẵn trong DB (`bts_stations`),
+    // không cần triangulate vì kết quả cũng chỉ trả về tâm trạm với accuracy
+    // = bán kính phủ (vô nghĩa định vị). Thay vào đó emit cellTowers +
+    // connectedBts qua `device_heartbeat` để FE tự highlight vùng phủ + đếm
+    // "GPS mất N phút" mà không cần move marker.
     const validCells = (dto.cellTowers ?? []).filter(isValidCell);
-    if (validCells.length > 0) {
-      const sorted = markServingCell(validCells);
-      const serving = sorted.find((c) => c.isServing) ?? sorted[0];
-      const loc = await this.btsService.locateFromCells(
-        sorted,
-        serving?.type || 'lte',
-      );
-      if (loc) {
-        const synthetic: SubmitDataDto = {
-          locations: [
-            {
-              latitude: loc.lat,
-              longitude: loc.lon,
-              accuracy: loc.accuracy,
-              quality: 'network',
-              timestamp: Date.now(),
-            },
-          ],
-          cellTowers: validCells,
-          batteryLevel: dto.batteryLevel,
+    const cells = validCells.length > 0 ? markServingCell(validCells) : [];
+    const servingCell = cells.find((c) => c.isServing) ?? null;
+
+    let connectedBts: {
+      id: number;
+      lat: number;
+      lon: number;
+      radio: string | null;
+      range: number | null;
+    } | null = null;
+    if (servingCell) {
+      const row = await this.prisma.bts_stations.findUnique({
+        where: {
+          mcc_mnc_lac_cid: {
+            mcc: servingCell.mcc,
+            mnc: servingCell.mnc,
+            lac: servingCell.lac,
+            cid: servingCell.cid,
+          },
+        },
+        select: { id: true, lat: true, lon: true, radio: true, range: true },
+      });
+      if (row) {
+        connectedBts = {
+          id: row.id,
+          lat: Number(row.lat),
+          lon: Number(row.lon),
+          radio: row.radio,
+          range: row.range,
         };
-        await this.saveData(deviceId, synthetic);
-        return { success: true };
       }
+      // Background lookup nếu BTS chưa có trong DB — lần heartbeat sau đã
+      // có row, connectedBts sẽ được trả về trong event.
+      void this.lookupBtsInBackground(servingCell);
     }
 
     const device = await this.prisma.devices.findUnique({
@@ -327,6 +336,18 @@ export class IngestService {
       deviceId,
       batteryLevel: batteryLevel ?? null,
       timestamp: now.toISOString(),
+      cellTowers: cells.map((c) => ({
+        type: c.type,
+        mcc: c.mcc,
+        mnc: c.mnc,
+        lac: c.lac,
+        cid: c.cid,
+        pci: c.pci ?? null,
+        rssi: c.rssi ?? null,
+        signalDbm: c.signalDbm ?? null,
+        isServing: c.isServing,
+      })),
+      connectedBts,
     });
 
     if (batteryLevel != null) {

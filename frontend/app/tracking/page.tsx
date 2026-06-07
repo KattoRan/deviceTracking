@@ -121,6 +121,10 @@ function TrackingPageInner() {
       connectedBts: event.connectedBts,
       spoofingSuspected: event.spoofingSuspected,
       gpsBtsDistanceM: event.gpsBtsDistanceM,
+      // Marker chỉ dịch khi nhận device_moved → đây cũng là dấu mốc fix GPS
+      // gần nhất. FE so với now để hiện badge "GPS mất N phút" khi heartbeat
+      // bắt đầu chiếm sóng.
+      lastGpsAt: event.timestamp,
     };
     setDevices((prev) =>
       prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
@@ -129,14 +133,17 @@ function TrackingPageInner() {
       prev && prev.id === event.deviceId ? { ...prev, ...patch } : prev,
     );
   }, []);
-  // Heartbeat: device đứng yên không gửi fix mới. Chỉ refresh last_seen +
-  // status + pin — KHÔNG đụng vào lat/lon/cellTowers/connectedBts để marker
-  // không bị "nhấp nháy" về tọa độ cũ trong khi metadata realtime vẫn đang
-  // hiển thị từ device_moved gần nhất.
+  // Heartbeat: device còn sống nhưng KHÔNG có fix GPS mới. Refresh
+  // last_seen + status + pin, cập nhật realtime cellTowers + connectedBts
+  // (cha mẹ vẫn thấy trạm đang nối thay đổi khi user di chuyển trong vùng
+  // mất GPS). KHÔNG đụng lat/lon/quality/lastGpsAt — marker ở fix GPS cuối,
+  // chênh lệch (now - lastGpsAt) chính là thời gian mất GPS.
   const handleDeviceHeartbeat = useCallback((event: DeviceHeartbeatEvent) => {
     const patch: Partial<Device> = {
       last_seen: event.timestamp,
       status: "online",
+      cellTowers: event.cellTowers,
+      connectedBts: event.connectedBts,
     };
     if (event.batteryLevel != null) patch.last_battery = event.batteryLevel;
     setDevices((prev) =>

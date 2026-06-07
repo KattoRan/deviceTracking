@@ -50,6 +50,13 @@ export interface Device {
   gpsBtsDistanceM?: number | null;
   /** Device is locked by admin. */
   is_locked?: boolean;
+  /**
+   * Timestamp (ISO) của fix GPS quality `gps`/`approx` gần nhất. Populated
+   * in-memory từ `device_moved`. KHÔNG cập nhật khi nhận `device_heartbeat`
+   * (chính nó là tín hiệu "không có GPS"). FE so với `last_seen` để hiện
+   * badge "GPS mất N phút".
+   */
+  lastGpsAt?: string | null;
 }
 
 /** GET /api/v1/devices/:id */
@@ -140,13 +147,19 @@ export interface LocationHistory {
 
 /**
  * Socket.IO `device_heartbeat` event — bắn khi mobile báo "còn sống" mà
- * không kèm fix GPS mới. UI dùng để refresh `last_seen` + clear trạng thái
- * offline mà KHÔNG đụng vào lat/lon (tránh đè marker bằng dữ liệu cũ).
+ * không kèm fix GPS mới. UI dùng để:
+ *   - Refresh `last_seen` + clear trạng thái offline (KHÔNG đụng lat/lon —
+ *     tránh đè marker bằng dữ liệu cũ; marker giữ ở fix GPS gần nhất).
+ *   - Cập nhật realtime "đang nối trạm nào" qua `cellTowers` + `connectedBts`
+ *     → highlight vùng phủ sóng trên map dù marker đứng yên.
+ *   - Đếm thời gian từ fix GPS cuối để hiện badge "GPS mất N phút".
  */
 export interface DeviceHeartbeatEvent {
   deviceId: string;
   batteryLevel: number | null;
   timestamp: string;
+  cellTowers: CellTowerInfo[];
+  connectedBts: ConnectedBts | null;
 }
 
 /** Socket.IO `device_moved` event payload (from backend EventsGateway). */

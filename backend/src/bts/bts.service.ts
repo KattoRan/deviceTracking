@@ -34,25 +34,6 @@ interface BtsRow {
 const CACHE_TTL_SECONDS = 60;
 const RAW_LIMIT = 2000;
 const CLUSTER_LIMIT = 5000;
-// TTL cho cache cell-locate. User mất GPS thường đứng yên indoor → cùng set
-// cells lặp lại liên tục, cache giúp giảm từ ~120 call/h xuống ~6 call/h
-// trên tick 30s. 10 phút đủ để tránh dữ liệu stale nếu user thực sự dịch
-// chuyển nhưng vẫn thấy cùng cells (hiếm vì cell coverage ~vài km).
-const LOCATE_CACHE_TTL_SECONDS = 600;
-
-/**
- * Fingerprint cells theo identity tuple (mcc-mnc-lac-cid), sort lexicographic
- * để 2 mảng cùng set nhưng khác thứ tự cho ra cùng key. Bỏ qua signalDbm vì
- * tín hiệu biến động liên tục mà không đổi vị trí thực.
- */
-function fingerprintCells(
-  cells: Array<{ mcc: number; mnc: number; lac: number; cid: number }>,
-): string {
-  return cells
-    .map((c) => `${c.mcc}-${c.mnc}-${c.lac}-${c.cid}`)
-    .sort()
-    .join(',');
-}
 
 @Injectable()
 export class BtsService {
@@ -159,108 +140,6 @@ export class BtsService {
     return this.prisma.bts_stations.findUnique({
       where: { mcc_mnc_lac_cid: { mcc, mnc, lac, cid } },
     });
-  }
-
-  /**
-   * Cell-based positioning fallback dùng khi mobile mất GPS hoàn toàn.
-   *
-   * Combain endpoint cùng `fetchAndInsert` dùng nhưng truyền N cell (serving
-   * + neighbors) + signalStrength → API triangulate ra vị trí device kèm
-   * accuracy. Caller cần đối xử kết quả này như fix tier `network` (drift
-   * thường vài trăm m → vài km), KHÔNG dùng để eval geofence.
-   *
-   * Trả về null nếu thiếu API key/URL, mảng cells rỗng, hoặc Combain không
-   * trả được fix — caller nên fall back về heartbeat thường.
-   */
-  async locateFromCells(
-    cells: Array<{
-      mcc: number;
-      mnc: number;
-      lac: number;
-      cid: number;
-      signalDbm?: number | null;
-      type?: string | null;
-    }>,
-    fallbackRadio = 'lte',
-  ): Promise<{ lat: number; lon: number; accuracy: number } | null> {
-    if (cells.length === 0) return null;
-
-    // Cache fingerprint trước khi check env — cache hit thì kể cả không có
-    // API key (vd sau khi xoay key, deploy mới) ta vẫn trả result từ tick
-    // cũ trong cửa sổ TTL → mượt cho user, không ép họ đợi.
-    const cacheKey = `bts:locate:${fingerprintCells(cells)}`;
-    const cached = await this.redis.get(cacheKey);
-    if (cached) {
-      try {
-        return JSON.parse(cached) as {
-          lat: number;
-          lon: number;
-          accuracy: number;
-        };
-      } catch {
-        // payload cũ malformed (vd thay schema) — fall through và refetch
-      }
-    }
-
-    const key = process.env.COMBAIN_API_KEY;
-    const combainUrl = process.env.COMBAIN_URL;
-    if (!key || !combainUrl) return null;
-
-    // Combain chỉ nhận một `radioType` cho cả request → lấy theo cell đầu
-    // (thường là serving cell sau khi caller đã sort/filter). Fallback `lte`
-    // vì đó là tech phổ biến nhất ở VN.
-    const radio = (cells[0].type || fallbackRadio).toLowerCase();
-    const cellTowers = cells.map((c) => {
-      const tower: {
-        mobileCountryCode: number;
-        mobileNetworkCode: number;
-        locationAreaCode: number;
-        cellId: number;
-        signalStrength?: number;
-      } = {
-        mobileCountryCode: c.mcc,
-        mobileNetworkCode: c.mnc,
-        locationAreaCode: c.lac,
-        cellId: c.cid,
-      };
-      if (typeof c.signalDbm === 'number') tower.signalStrength = c.signalDbm;
-      return tower;
-    });
-
-    let data: CombainResponse;
-    try {
-      const res = await axios.post<CombainResponse>(
-        combainUrl,
-        { radioType: radio, cellTowers },
-        { params: { key }, timeout: 8000 },
-      );
-      data = res.data;
-    } catch (err) {
-      this.logger.warn(
-        `Combain locate (${cellTowers.length} cells) failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return null;
-    }
-
-    const lat = data.location?.lat;
-    const lng = data.location?.lng;
-    if (data.error || lat == null || lng == null) {
-      this.logger.debug(
-        `Combain locate no fix from ${cellTowers.length} cells: ${data.error?.message ?? 'no data'}`,
-      );
-      return null;
-    }
-    // accuracy có thể null khi Combain confidence thấp — gán fallback rộng
-    // 5km để FE biết đây là fix gần đúng, KHÔNG GPS-grade.
-    const result = { lat, lon: lng, accuracy: data.accuracy ?? 5000 };
-    // Chỉ cache success — fail không cache để tick kế tiếp được retry ngay
-    // (vd Combain transient 5xx hoặc API hết quota tạm thời).
-    await this.redis.setex(
-      cacheKey,
-      LOCATE_CACHE_TTL_SECONDS,
-      JSON.stringify(result),
-    );
-    return result;
   }
 
   async getForMap(query: MapQueryDto) {
