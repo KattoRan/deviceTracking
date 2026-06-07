@@ -93,9 +93,14 @@ export interface IngestResponse {
  * Tín hiệu "còn sống" khi watcher không emit fix mới trong cửa sổ gửi.
  * Server chỉ refresh `last_seen` + `last_battery`, không insert
  * `location_history` → bảng lịch sử không phình ra theo từng tick đứng yên.
+ *
+ * Khi đính kèm `cellTowers` (mất GPS hoàn toàn), server thử cell-based
+ * positioning (Combain) — thành công sẽ ingest như fix `network`-tier; thất
+ * bại rơi về heartbeat thường.
  */
 export interface HeartbeatPayload {
   batteryLevel?: number;
+  cellTowers?: CellTower[];
 }
 
 export interface CellTowerInfoRealtime extends CellTower {

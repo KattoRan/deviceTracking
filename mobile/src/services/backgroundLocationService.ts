@@ -296,6 +296,10 @@ async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
  * Headless heartbeat — gọi khi task fire nhưng buffer rỗng (user đứng yên
  * hoặc mọi fix bị filter accuracy). Dashboard cha mẹ vẫn thấy `last_seen`
  * và pin cập nhật đều thay vì "treo" 5-10 phút như flow cũ.
+ *
+ * Đính kèm cellTowers (nếu lấy được) để server thử cell-based positioning
+ * qua Combain khi mất GPS hoàn toàn — thành công sẽ ingest fix `network`,
+ * thất bại rơi về heartbeat thường ở server.
  */
 async function sendHeartbeatInBackground(
   deviceId: string,
@@ -311,6 +315,13 @@ async function sendHeartbeatInBackground(
     // ignore — battery API có thể không có ở simulator
   }
 
+  let cellTowers: Awaited<ReturnType<typeof getCellTowerInfo>> = [];
+  try {
+    cellTowers = await getCellTowerInfo();
+  } catch {
+    // cell sample fail — gửi heartbeat không cells
+  }
+
   try {
     const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.HEARTBEAT}`, {
       method: 'POST',
@@ -318,7 +329,10 @@ async function sendHeartbeatInBackground(
         'Content-Type': 'application/json',
         'x-device-id': deviceId,
       },
-      body: JSON.stringify({ batteryLevel }),
+      body: JSON.stringify({
+        batteryLevel,
+        cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
+      }),
     });
     if (res.ok) await markFlushed();
   } catch {

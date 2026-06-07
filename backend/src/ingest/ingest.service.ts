@@ -137,11 +137,15 @@ export class IngestService {
     // Fake-GPS apps change the OS location but cannot change which cell
     // tower the modem is attached to. If the reported GPS position is
     // unreasonably far from the connected BTS, the fix is likely spoofed.
+    //
+    // Chỉ gate cho fix tier `gps` — fix `approx`/`network` đã biết là imprecise
+    // (WiFi/cell-based hoặc cell-locate fallback), so với center BTS có thể
+    // lệch cả km một cách hợp lệ → không có nghĩa để chấm spoofing.
     const SPOOF_RANGE_MULTIPLIER = 2;
     const DEFAULT_BTS_RANGE_M = 2000; // fallback when BTS has no range data
     let spoofingSuspected = false;
     let gpsBtsDistanceM: number | null = null;
-    if (connectedBts) {
+    if (connectedBts && latestQuality === 'gps') {
       gpsBtsDistanceM = Math.round(
         haversineMeters(latest.latitude, latest.longitude, connectedBts.lat, connectedBts.lon),
       );
@@ -235,6 +239,40 @@ export class IngestService {
     dto: HeartbeatDto,
   ): Promise<{ success: true }> {
     if (!deviceId) throw new BadRequestException('Missing device id');
+
+    // Cell-based fallback: khi mobile mất GPS hoàn toàn (buffer rỗng cả
+    // cửa sổ gửi), nó đính kèm cellTowers vào heartbeat. Server thử
+    // Combain triangulate → nếu được fix thì tạo synthetic `network`-tier
+    // location và đẩy qua saveData() như fix thường (persist
+    // location_history, emit device_moved, …). Geofence eval tự skip vì
+    // quality !== 'gps'. Combain fail (no key, no fix, network error) →
+    // rơi xuống heartbeat semantics gốc bên dưới.
+    const validCells = (dto.cellTowers ?? []).filter(isValidCell);
+    if (validCells.length > 0) {
+      const sorted = markServingCell(validCells);
+      const serving = sorted.find((c) => c.isServing) ?? sorted[0];
+      const loc = await this.btsService.locateFromCells(
+        sorted,
+        serving?.type || 'lte',
+      );
+      if (loc) {
+        const synthetic: SubmitDataDto = {
+          locations: [
+            {
+              latitude: loc.lat,
+              longitude: loc.lon,
+              accuracy: loc.accuracy,
+              quality: 'network',
+              timestamp: Date.now(),
+            },
+          ],
+          cellTowers: validCells,
+          batteryLevel: dto.batteryLevel,
+        };
+        await this.saveData(deviceId, synthetic);
+        return { success: true };
+      }
+    }
 
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },

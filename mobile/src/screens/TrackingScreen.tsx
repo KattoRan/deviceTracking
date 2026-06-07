@@ -18,7 +18,9 @@ import { DEFAULT_TRACKING_INTERVAL_MS } from '../config/api';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { useLocation } from '../hooks/useLocation';
 import type {
+  CellTower,
   CommandDispatchEvent,
+  HeartbeatPayload,
   IngestPayload,
   LocationData,
 } from '../models/types';
@@ -137,11 +139,22 @@ export default function TrackingScreen() {
           // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
         }
 
-        // Watcher im lặng cả cửa sổ này (user đứng yên). Bắn heartbeat thay
-        // vì resend fix cũ — server chỉ refresh last_seen, không tạo row
-        // location_history trùng tọa độ + cùng timestamp.
+        // Watcher im lặng cả cửa sổ này (user đứng yên hoặc mất GPS). Bắn
+        // heartbeat thay vì resend fix cũ — server chỉ refresh last_seen.
+        // Kèm cellTowers (nếu có) để server thử cell-based positioning qua
+        // Combain khi mất GPS hoàn toàn; thành công sẽ ingest fix `network`,
+        // thất bại rơi về heartbeat thường.
         if (batch.length === 0) {
-          const hb = { batteryLevel };
+          let cellTowers: CellTower[] = [];
+          try {
+            cellTowers = await getCellTowerInfo();
+          } catch {
+            // cell sample fail — vẫn gửi heartbeat không cells
+          }
+          const hb: HeartbeatPayload = {
+            batteryLevel,
+            cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
+          };
           const sentOverMqtt = await publishHeartbeat(storedData.deviceId, hb);
           if (!sentOverMqtt) {
             await sendHeartbeat(storedData.deviceId, hb);
