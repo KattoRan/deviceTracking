@@ -18,7 +18,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import deviceService from "@/services/deviceService";
-import type { CellTowerInfo, Device, DeviceDetail } from "@/types/device";
+import type {
+  CellTowerInfo,
+  ConnectedBts,
+  Device,
+  DeviceDetail,
+} from "@/types/device";
 import RemoteControlPanel from "./RemoteControlPanel";
 
 interface DeviceDetailPanelProps {
@@ -26,6 +31,11 @@ interface DeviceDetailPanelProps {
   onClose: () => void;
   isMobile?: boolean;
   onLockChange?: (deviceId: string, locked: boolean) => void;
+  /**
+   * Yêu cầu map fly tới trạm BTS — gọi khi user bấm vào row serving cell
+   * trong danh sách trạm kết nối. Page truyền callback để forward sang MapView.
+   */
+  onFocusBts?: (bts: ConnectedBts) => void;
 }
 
 interface SignalLevel {
@@ -82,6 +92,7 @@ export default function DeviceDetailPanel({
   onClose,
   isMobile = false,
   onLockChange,
+  onFocusBts,
 }: DeviceDetailPanelProps) {
   const [detail, setDetail] = useState<DeviceDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -372,6 +383,11 @@ export default function DeviceDetailPanel({
                   <CellTowerRow
                     key={`${c.mcc}-${c.mnc}-${c.lac}-${c.cid}`}
                     cell={c}
+                    onSelect={
+                      c.isServing && device.connectedBts && onFocusBts
+                        ? () => onFocusBts(device.connectedBts!)
+                        : undefined
+                    }
                   />
                 ))}
               </ul>
@@ -489,16 +505,25 @@ function InfoCard({
   );
 }
 
-function CellTowerRow({ cell }: { cell: CellTowerInfo }) {
+function CellTowerRow({
+  cell,
+  onSelect,
+}: {
+  cell: CellTowerInfo;
+  onSelect?: () => void;
+}) {
   const sig = signalLevel(cell.signalDbm);
-  return (
-    <li
-      className={`rounded-lg border p-2.5 ${
-        cell.isServing
-          ? "border-blue-200 bg-blue-50"
-          : "border-slate-200 bg-slate-50"
-      }`}
-    >
+  const clickable = !!onSelect;
+  const baseClass = `rounded-lg border p-2.5 text-left ${
+    cell.isServing
+      ? "border-blue-200 bg-blue-50"
+      : "border-slate-200 bg-slate-50"
+  }`;
+  const interactiveClass = clickable
+    ? " w-full cursor-pointer transition-colors hover:bg-blue-100"
+    : "";
+  const content = (
+    <>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           {cell.type && (
@@ -534,7 +559,25 @@ function CellTowerRow({ cell }: { cell: CellTowerInfo }) {
       </div>
       <p className="mt-1.5 font-mono text-[10px] text-slate-500">
         MCC {cell.mcc} · MNC {cell.mnc} · LAC {cell.lac}
+        {clickable && (
+          <span className="ml-2 text-blue-600">· Xem trên bản đồ</span>
+        )}
       </p>
+    </>
+  );
+  return (
+    <li>
+      {clickable ? (
+        <button
+          type="button"
+          onClick={onSelect}
+          className={baseClass + interactiveClass}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className={baseClass}>{content}</div>
+      )}
     </li>
   );
 }

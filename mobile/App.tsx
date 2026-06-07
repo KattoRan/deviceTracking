@@ -1,7 +1,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Vibration, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import BreachBellButton from './src/components/BreachBellButton';
@@ -43,6 +43,7 @@ function AppContent() {
   const { registrationStatus, storedData, clearDeviceData } = useDeviceInfo();
   const [isLocked, setIsLocked] = useState(false);
   const [lockChecking, setLockChecking] = useState(true);
+  const alarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the Socket.IO connection open for the lifetime of the app once
   // the device is registered — every screen that listens for `device_moved`
@@ -121,14 +122,34 @@ function AppContent() {
           1,
           Math.min(60, Number(event.payload?.durationSec) || 10),
         );
+
+        // Hủy lần ring đang chạy nếu vẫn còn (cha mẹ bấm liên tiếp).
+        if (alarmTimerRef.current) {
+          clearTimeout(alarmTimerRef.current);
+          alarmTimerRef.current = null;
+        }
+
         Vibration.vibrate([0, 500, 200], true);
-        setTimeout(() => {
+
+        alarmTimerRef.current = setTimeout(() => {
           Vibration.cancel();
+          alarmTimerRef.current = null;
           sendCommandResult({ commandId: event.commandId, success: true });
         }, durationSec * 1000);
       }
     });
   }, [registrationStatus]);
+
+  // Dọn timer khi unmount để không gửi sendCommandResult sau khi component
+  // đã chết.
+  useEffect(() => {
+    return () => {
+      if (alarmTimerRef.current) {
+        clearTimeout(alarmTimerRef.current);
+        alarmTimerRef.current = null;
+      }
+    };
+  }, []);
 
   if (registrationStatus === 'loading' || (registrationStatus === 'registered' && lockChecking)) {
     return (

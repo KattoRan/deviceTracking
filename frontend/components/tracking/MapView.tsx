@@ -71,6 +71,12 @@ interface MapViewProps {
   showBtsLines: boolean;
   geofences: GeofenceListItem[];
   showGeofences: boolean;
+  /**
+   * Yêu cầu fly map tới 1 BTS (vd từ panel cell click). Mỗi click parent
+   * tạo object literal mới để useEffect re-fire dù cùng cell. Set null để
+   * không fly.
+   */
+  focusBts?: { id: number; lat: number; lon: number; range: number | null } | null;
 }
 
 export default function MapView({
@@ -83,6 +89,7 @@ export default function MapView({
   showBtsLines,
   geofences,
   showGeofences,
+  focusBts,
 }: MapViewProps) {
   const mapRef = useRef<MapRef | null>(null);
   const moveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,6 +108,21 @@ export default function MapView({
     const t = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(t);
   }, []);
+
+  // Khi parent yêu cầu focus 1 BTS (vd user click serving cell trong panel) →
+  // fly camera tới trạm + set selectedBtsId để hiện coverage. Parent tạo object
+  // literal mới mỗi click nên kể cả cùng BTS, effect vẫn re-fire.
+  useEffect(() => {
+    if (!focusBts) return;
+    const map = mapRef.current;
+    if (!map) return;
+    map.flyTo({
+      center: [focusBts.lon, focusBts.lat],
+      zoom: 16,
+      duration: INITIAL_FLY_DURATION,
+    });
+    setSelectedBtsId(focusBts.id);
+  }, [focusBts]);
 
   const reportBounds = useCallback(() => {
     if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
@@ -302,26 +324,40 @@ export default function MapView({
   const btsCoverage = useMemo<FeatureCollection<Polygon>>(() => {
     // Chỉ vẽ vùng phủ sóng cho trạm đang chọn — hiển thị tất cả cùng lúc rất
     // rối. User click trạm nào thì hiện coverage của trạm đó.
-    if (selectedBtsId == null || !geoJsonData)
+    if (selectedBtsId == null)
       return { type: "FeatureCollection", features: [] };
-    const target = geoJsonData.features.find(
+
+    let lon: number | null = null;
+    let lat: number | null = null;
+    let radius = 0;
+    let radio: string | null = null;
+
+    // Ưu tiên geoJsonData (BTS trong viewport hiện tại có range chính xác).
+    const target = geoJsonData?.features.find(
       (f) => f.properties.type === "bts" && f.properties.id === selectedBtsId,
     );
-    if (!target) return { type: "FeatureCollection", features: [] };
-    const radius = coverageRadius(target.properties);
-    if (radius < 50) return { type: "FeatureCollection", features: [] };
+    if (target) {
+      lon = Number(target.geometry.coordinates[0]);
+      lat = Number(target.geometry.coordinates[1]);
+      radius = coverageRadius(target.properties);
+      radio = target.properties.radio ?? null;
+    } else if (focusBts && focusBts.id === selectedBtsId) {
+      // Fallback: panel cell click có thể fly tới BTS ngoài viewport vừa rồi.
+      // Map sẽ refetch sau flyTo nhưng coverage cần hiện ngay.
+      lon = focusBts.lon;
+      lat = focusBts.lat;
+      radius = focusBts.range && focusBts.range > 0 ? focusBts.range : 1000;
+    }
+
+    if (lon == null || lat == null || radius < 50)
+      return { type: "FeatureCollection", features: [] };
     return {
       type: "FeatureCollection",
       features: [
-        metersCircle(
-          Number(target.geometry.coordinates[0]),
-          Number(target.geometry.coordinates[1]),
-          radius,
-          { id: selectedBtsId, radius, radio: target.properties.radio },
-        ),
+        metersCircle(lon, lat, radius, { id: selectedBtsId, radius, radio }),
       ],
     };
-  }, [geoJsonData, selectedBtsId]);
+  }, [geoJsonData, selectedBtsId, focusBts]);
 
   // Coverage auto cho selected device khi đang mất GPS — báo cha mẹ "thiết bị
   // đâu đó trong vùng phủ trạm này". Re-eval mỗi heartbeat (device prop đổi

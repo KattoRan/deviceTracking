@@ -19,6 +19,7 @@ import btsService, { type MapBounds } from "@/services/btsService";
 import geofenceService from "@/services/geofenceService";
 import type { BtsFeature, BtsGeoJson } from "@/types/bts";
 import type {
+  ConnectedBts,
   Device,
   DeviceHeartbeatEvent,
   DeviceMovedEvent,
@@ -76,6 +77,10 @@ function TrackingPageInner() {
   const [btsLoading, setBtsLoading] = useState(false);
   const [geofences, setGeofences] = useState<GeofenceListItem[]>([]);
   const [showGeofences, setShowGeofences] = useState(true);
+  // Yêu cầu MapView fly tới 1 BTS — set khi user bấm serving cell trong
+  // panel. Object literal mới mỗi click → MapView useEffect re-fire kể cả khi
+  // bấm cùng cell lần thứ hai.
+  const [focusBts, setFocusBts] = useState<ConnectedBts | null>(null);
 
   const handleDeviceMoved = useCallback((event: DeviceMovedEvent) => {
     if (event.connectedBts) {
@@ -316,6 +321,7 @@ function TrackingPageInner() {
           showBtsLines={showBtsLines}
           geofences={geofences}
           showGeofences={showGeofences}
+          focusBts={focusBts}
         />
 
         <MapControls
@@ -337,6 +343,7 @@ function TrackingPageInner() {
               onClose={() => setSelectedDevice(null)}
               isMobile={isMobile}
               onLockChange={handleLockChange}
+              onFocusBts={(bts) => setFocusBts({ ...bts })}
             />
           )}
         </AnimatePresence>
