@@ -118,6 +118,8 @@ interface MonitoringAlertsContextValue {
   returned: ReturnedToast[];
   dismissReturned: (uid: string) => void;
   ackSos: (sosEventId: string) => Promise<void>;
+  /** Đánh dấu tất cả SOS chưa xử lý là đã xử lý — badge count về 0 tức thì. */
+  ackAllSos: () => Promise<void>;
   dismissLowBattery: (deviceId: string) => void;
   dismissOffline: (deviceId: string) => void;
   /**
@@ -227,6 +229,17 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
     } catch {
       // Non-fatal — server-side ack is for receipt tracking; the local list
       // is already updated optimistically.
+    }
+  }, []);
+
+  const ackAllSos = useCallback(async () => {
+    // Optimistic — clear local map ngay để badge về 0, server sẽ ack đồng loạt.
+    setSosMap((prev) => (prev.size === 0 ? prev : new Map()));
+    try {
+      await sosService.acknowledgeAll();
+    } catch {
+      // Non-fatal — nếu fail, lần load trang SOS kế tiếp sẽ re-fetch và
+      // populate lại sosMap từ API.
     }
   }, []);
 
@@ -444,6 +457,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       returned,
       dismissReturned,
       ackSos,
+      ackAllSos,
       dismissLowBattery,
       dismissOffline,
       subscribeDeviceMoved,
@@ -458,6 +472,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       returned,
       dismissReturned,
       ackSos,
+      ackAllSos,
       dismissLowBattery,
       dismissOffline,
       subscribeDeviceMoved,

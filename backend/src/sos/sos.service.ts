@@ -126,4 +126,34 @@ export class SosService {
       data: { acknowledged_at: new Date() },
     });
   }
+
+  /**
+   * Đánh dấu tất cả SOS chưa xử lý của parent này là đã xử lý — dùng cho nút
+   * "Xử lý tất cả" trên trang lịch sử SOS. Scope cứng theo parent_account_id
+   * trong filter để không leak event của parent khác.
+   */
+  async acknowledgeAll(parentAccountId: string): Promise<{ count: number }> {
+    const result = await this.prisma.sos_events.updateMany({
+      where: {
+        parent_account_id: parentAccountId,
+        acknowledged_at: null,
+      },
+      data: { acknowledged_at: new Date() },
+    });
+    return { count: result.count };
+  }
+
+  /**
+   * Xoá vĩnh viễn các SOS event đã xử lý của parent này — nút "Xoá lịch sử".
+   * KHÔNG xoá event chưa xử lý (vẫn cần hiển thị làm cảnh báo active).
+   */
+  async deleteAcknowledged(parentAccountId: string): Promise<{ count: number }> {
+    const result = await this.prisma.sos_events.deleteMany({
+      where: {
+        parent_account_id: parentAccountId,
+        acknowledged_at: { not: null },
+      },
+    });
+    return { count: result.count };
+  }
 }

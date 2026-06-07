@@ -14,43 +14,62 @@ export function isValidCell(c: CellTowerDto): boolean {
 /**
  * Picks the serving cell.
  *
- * Source of truth is `isRegistered` reported by the modem (via
- * `CellInfo.isRegistered` on Android) — that's the cell the device is
- * actually attached to. Signal strength is only a heuristic and can
- * mislead: a neighbour cell may have higher RSRP than the serving one
- * during handover, and under LTE+NR NSA the anchor and secondary are
- * both registered at once with different signals.
- *
- * Policy:
- *   1. If any cell reports `isRegistered=true`, pick the strongest among
- *      them. This handles dual-registered NSA correctly — the anchor
- *      (LTE) and the NR leg are both registered, we surface the one the
- *      user is effectively experiencing.
- *   2. Otherwise (iOS, older builds, mock data without the flag),
- *      fall back to the strongest signal overall.
+ * Policy (theo thứ tự ưu tiên):
+ *   1. Lọc pool = cells có `isRegistered=true`. Nếu modem không báo cell nào
+ *      registered (iOS, older Android, mock) → pool = toàn bộ cells.
+ *   2. Trong pool, nếu có cell `isPrimary=true` → chọn cell đó (single source
+ *      of truth từ Android API 28+ `CONNECTION_PRIMARY_SERVING`, đáng tin
+ *      hơn isRegistered vì chỉ một cell duy nhất là PRIMARY tại 1 thời điểm).
+ *   3. Không có cell nào primary → chọn theo **tech rank** (NR > LTE > WCDMA
+ *      > GSM > CDMA). Lý do: signalDbm khác thang giữa các tech (GSM RSSI ~
+ *      -50…-110, LTE RSRP ~ -44…-140), so raw dBm thiên vị GSM dù LTE đang
+ *      là tech chính. Trong CSFB / dual-registration cả 2 đều registered
+ *      nhưng LTE mới là cell ta cần track.
+ *   4. Cùng tech rank → signal mạnh nhất. Cells thiếu signal đếm là yếu nhất
+ *      để cell có reading thật luôn thắng.
  */
+const TECH_RANK: Record<string, number> = {
+  NR: 4,
+  LTE: 3,
+  WCDMA: 2,
+  UMTS: 2,
+  GSM: 1,
+  CDMA: 1,
+};
+
+function techRank(type: string | undefined | null): number {
+  return TECH_RANK[(type || '').toUpperCase()] ?? 0;
+}
+
 export function markServingCell(cells: CellTowerDto[]): NormalizedCell[] {
   if (cells.length === 0) return [];
 
   const registered = cells.filter((c) => c.isRegistered === true);
   const pool = registered.length > 0 ? registered : cells;
 
-  // Cells with no usable signal (null/undefined — e.g. WCDMA without RSCP)
-  // rank as the weakest so a cell with a real reading always wins. When the
-  // whole pool lacks a reading (3G-only device on such a modem), default to
-  // the first pooled cell so a serving cell is still chosen.
-  const sig = (c: CellTowerDto) =>
-    typeof c.signalDbm === 'number' ? c.signalDbm : -Infinity;
-
-  let bestIndex = cells.indexOf(pool[0]);
-  let bestDbm = sig(pool[0]);
-  pool.forEach((c) => {
-    if (sig(c) > bestDbm) {
-      bestDbm = sig(c);
-      bestIndex = cells.indexOf(c);
+  // Bước 2: ưu tiên cao nhất — PRIMARY_SERVING ground truth từ modem.
+  const primary = pool.find((c) => c.isPrimary === true);
+  let best: CellTowerDto;
+  if (primary) {
+    best = primary;
+  } else {
+    // Bước 3 + 4: tech rank trước, signal làm tiebreaker trong cùng tech.
+    const sig = (c: CellTowerDto) =>
+      typeof c.signalDbm === 'number' ? c.signalDbm : -Infinity;
+    best = pool[0];
+    let bestRank = techRank(best.type);
+    let bestDbm = sig(best);
+    for (const c of pool) {
+      const rank = techRank(c.type);
+      if (rank > bestRank || (rank === bestRank && sig(c) > bestDbm)) {
+        best = c;
+        bestRank = rank;
+        bestDbm = sig(c);
+      }
     }
-  });
+  }
 
+  const bestIndex = cells.indexOf(best);
   return cells.map((c, i) => ({ ...c, isServing: i === bestIndex }));
 }
 

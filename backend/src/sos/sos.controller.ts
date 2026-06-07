@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -72,5 +73,25 @@ export class SosController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<void> {
     return this.sosService.acknowledge(id, req.parentAccount.sub);
+  }
+
+  @Post('sos/ack-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Đánh dấu tất cả SOS chưa xử lý của parent này là đã xử lý',
+  })
+  acknowledgeAll(@Req() req: AuthedRequest): Promise<{ count: number }> {
+    return this.sosService.acknowledgeAll(req.parentAccount.sub);
+  }
+
+  @Delete('sos/acknowledged')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Xoá vĩnh viễn lịch sử SOS đã xử lý (giữ event chưa xử lý)',
+  })
+  deleteAcknowledged(@Req() req: AuthedRequest): Promise<{ count: number }> {
+    return this.sosService.deleteAcknowledged(req.parentAccount.sub);
   }
 }

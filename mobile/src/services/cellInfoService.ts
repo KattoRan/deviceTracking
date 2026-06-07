@@ -38,6 +38,7 @@ const MOCK_TOWERS: CellTower[] = [
     // Mark one mock tower as the registered cell so the backend's
     // "prefer isRegistered" path is exercised even without real modem data.
     isRegistered: true,
+    isPrimary: true,
   },
   {
     type: 'LTE',
@@ -49,6 +50,7 @@ const MOCK_TOWERS: CellTower[] = [
     rssi: -82,
     pci: 456,
     isRegistered: false,
+    isPrimary: false,
   },
 ];
 
@@ -100,6 +102,7 @@ function normalize(raw: NativeCellInfo): CellTower | null {
     rssi: isValidDbm(raw.rssi) ? raw.rssi : undefined,
     pci: raw.pci ?? undefined,
     isRegistered: raw.isRegistered,
+    isPrimary: raw.isPrimary ?? undefined,
   };
 }
 

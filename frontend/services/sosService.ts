@@ -25,4 +25,18 @@ export const sosService = {
   acknowledge: async (id: string): Promise<void> => {
     await apiClient.post(`api/v1/sos/${id}/ack`);
   },
+
+  acknowledgeAll: async (): Promise<{ count: number }> => {
+    const { data } = await apiClient.post<{ count: number }>(
+      "api/v1/sos/ack-all",
+    );
+    return data;
+  },
+
+  deleteAcknowledged: async (): Promise<{ count: number }> => {
+    const { data } = await apiClient.delete<{ count: number }>(
+      "api/v1/sos/acknowledged",
+    );
+    return data;
+  },
 };

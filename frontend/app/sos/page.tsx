@@ -4,9 +4,11 @@ import { formatDistanceToNow } from "@/lib/utils";
 import {
   Battery,
   CheckCircle2,
+  CheckCircle,
   Loader2,
   MapPin,
   Siren,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -14,11 +16,12 @@ import { useGeofenceAlerts } from "@/components/GeofenceAlerts";
 import { sosService, type SosEvent } from "@/services/sosService";
 
 export default function SosHistoryPage() {
-  const { sos } = useGeofenceAlerts();
+  const { sos, ackSos, ackAllSos } = useGeofenceAlerts();
   const [events, setEvents] = useState<SosEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acking, setAcking] = useState<string | null>(null);
+  const [bulkActing, setBulkActing] = useState<"ack" | "delete" | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -43,7 +46,9 @@ export default function SosHistoryPage() {
     if (acking) return;
     setAcking(id);
     try {
-      await sosService.acknowledge(id);
+      // Dùng provider's ackSos thay vì sosService.acknowledge trực tiếp để
+      // sosMap của provider cũng được clear → badge thông báo giảm tức thì.
+      await ackSos(id);
       setEvents((prev) =>
         prev.map((e) =>
           e.id === id ? { ...e, acknowledgedAt: new Date().toISOString() } : e,
@@ -56,20 +61,96 @@ export default function SosHistoryPage() {
     }
   }
 
+  async function handleAckAll() {
+    if (bulkActing) return;
+    setBulkActing("ack");
+    try {
+      await ackAllSos();
+      // Optimistic update local list — server đã ack đồng loạt.
+      const stamp = new Date().toISOString();
+      setEvents((prev) =>
+        prev.map((e) => (e.acknowledgedAt ? e : { ...e, acknowledgedAt: stamp })),
+      );
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkActing(null);
+    }
+  }
+
+  async function handleDeleteAcknowledged() {
+    if (bulkActing) return;
+    if (
+      !window.confirm(
+        "Xoá toàn bộ lịch sử SOS đã xử lý? Hành động này không khôi phục được.",
+      )
+    ) {
+      return;
+    }
+    setBulkActing("delete");
+    try {
+      await sosService.deleteAcknowledged();
+      setEvents((prev) => prev.filter((e) => !e.acknowledgedAt));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkActing(null);
+    }
+  }
+
+  const unackedCount = events.filter((e) => !e.acknowledgedAt).length;
+  const ackedCount = events.length - unackedCount;
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-8 md:py-8">
-      <header className="mb-6 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100">
-          <Siren className="h-5 w-5 text-red-600" />
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100">
+            <Siren className="h-5 w-5 text-red-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Lịch sử SOS
+            </h1>
+            <p className="text-sm text-slate-600">
+              Cảnh báo khẩn cấp từ người được giám sát
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Lịch sử SOS
-          </h1>
-          <p className="text-sm text-slate-600">
-            Cảnh báo khẩn cấp từ người được giám sát
-          </p>
-        </div>
+        {!loading && events.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {unackedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleAckAll}
+                disabled={bulkActing !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {bulkActing === "ack" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-3.5 w-3.5" />
+                )}
+                Xử lý tất cả ({unackedCount})
+              </button>
+            )}
+            {ackedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteAcknowledged}
+                disabled={bulkActing !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50 disabled:opacity-50"
+              >
+                {bulkActing === "delete" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
+                Xoá lịch sử ({ackedCount})
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       {loading ? (

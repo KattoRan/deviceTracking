@@ -48,6 +48,20 @@ class CellInfoModule : Module() {
     ) == PackageManager.PERMISSION_GRANTED
   }
 
+  /**
+   * Ground truth từ modem rằng đây là cell device đang chủ động dùng (data
+   * path). API 28+ — older devices trả null, server fall back về isRegistered
+   * + tech rank.
+   */
+  private fun CellInfo.isPrimaryServing(): Boolean? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+    return when (cellConnectionStatus) {
+      CellInfo.CONNECTION_PRIMARY_SERVING -> true
+      CellInfo.CONNECTION_SECONDARY_SERVING, CellInfo.CONNECTION_NONE -> false
+      else -> null
+    }
+  }
+
   private fun CellInfo.toMap(): Map<String, Any?>? = when (this) {
     is CellInfoLte -> {
       val id = cellIdentity
@@ -66,6 +80,7 @@ class CellInfoModule : Module() {
         // NSA). Backend uses this to pick the serving cell; signal strength
         // is only a fallback for when no cell reports it (e.g. iOS, mock).
         "isRegistered" to isRegistered,
+        "isPrimary" to isPrimaryServing(),
       )
     }
     is CellInfoGsm -> {
@@ -81,6 +96,7 @@ class CellInfoModule : Module() {
         "rssi" to s.dbm.dbmOrNull(),
         "signalDbm" to s.dbm.dbmOrNull(),
         "isRegistered" to isRegistered,
+        "isPrimary" to isPrimaryServing(),
       )
     }
     is CellInfoWcdma -> {
@@ -100,6 +116,7 @@ class CellInfoModule : Module() {
         "rssi" to s.dbm.wcdmaDbmOrNull(),
         "signalDbm" to s.dbm.wcdmaDbmOrNull(),
         "isRegistered" to isRegistered,
+        "isPrimary" to isPrimaryServing(),
       )
     }
     is CellInfoNr -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -117,6 +134,7 @@ class CellInfoModule : Module() {
         "rssi" to s.dbm.dbmOrNull(),
         "signalDbm" to s.dbm.dbmOrNull(),
         "isRegistered" to isRegistered,
+        "isPrimary" to isPrimaryServing(),
       )
     } else null
     else -> null

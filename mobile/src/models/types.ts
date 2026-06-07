@@ -71,6 +71,12 @@ export interface CellTower {
    * guessing from signal strength.
    */
   isRegistered?: boolean;
+  /**
+   * `CellInfo.getCellConnectionStatus() === CONNECTION_PRIMARY_SERVING` —
+   * cell device đang chủ động dùng (data path). Đáng tin hơn `isRegistered`.
+   * Optional vì API < 28 hoặc modem cũ không báo.
+   */
+  isPrimary?: boolean;
 }
 
 export interface IngestPayload {

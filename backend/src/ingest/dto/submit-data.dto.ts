@@ -84,6 +84,20 @@ export class CellTowerDto {
   @IsOptional()
   @IsBoolean()
   isRegistered?: boolean;
+
+  /**
+   * `CellInfo.getCellConnectionStatus() === CONNECTION_PRIMARY_SERVING`
+   * (Android API 28+). Đáng tin hơn `isRegistered` (chỉ một cell duy nhất
+   * là PRIMARY tại 1 thời điểm). Khi có, serving-cell picker dùng làm bước
+   * ưu tiên cao nhất trước khi xét tech rank + signal.
+   */
+  @ApiPropertyOptional({
+    description:
+      'True iff this is the modem`s PRIMARY_SERVING cell (single source of truth on Android 9+).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
 }
 
 export class SubmitDataDto {

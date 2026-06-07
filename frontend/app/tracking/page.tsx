@@ -210,10 +210,20 @@ function TrackingPageInner() {
   // Deep-link from a geofence breach toast (`/tracking?focus=<id>`):
   // pick the device once it's in the loaded list. MapView's `FlyToDevice`
   // then takes over and pans the map to it.
+  //
+  // Effect depends on `devices` để chờ device load xong từ API, nhưng `devices`
+  // cũng đổi mỗi lần `device_moved` arrive → nếu không track consumed, panel
+  // sẽ re-open mỗi GPS update sau khi user đã đóng. Dùng ref đánh dấu focus
+  // đã consume cho mount này.
+  const consumedFocusRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusDeviceId || devices.length === 0) return;
+    if (!focusDeviceId) return;
+    if (consumedFocusRef.current === focusDeviceId) return;
     const target = devices.find((d) => d.id === focusDeviceId);
-    if (target) setSelectedDevice(target);
+    if (target) {
+      consumedFocusRef.current = focusDeviceId;
+      setSelectedDevice(target);
+    }
   }, [focusDeviceId, devices]);
 
   // Geofences are admin-managed and rarely change; load once on mount.
