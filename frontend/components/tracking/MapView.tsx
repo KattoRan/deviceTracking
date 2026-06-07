@@ -44,14 +44,9 @@ function coverageRadius(props: BtsFeature["properties"]): number {
   return 800;
 }
 
-function techColor(radio?: string | null): string {
-  const tech = (radio || "").toUpperCase();
-  if (tech.includes("GSM")) return "#059669";
-  if (tech.includes("UMTS") || tech.includes("WCDMA")) return "#0284c7";
-  if (tech.includes("LTE")) return "#d97706";
-  if (tech.includes("NR") || tech.includes("5G")) return "#dc2626";
-  return "#0284c7";
-}
+// Coverage chỉ vẽ cho 1 trạm được chọn → dùng 1 màu cam thống nhất, không
+// phân biệt theo công nghệ (trước đây hiển thị nhiều trạm cùng lúc rất rối).
+const COVERAGE_COLOR = "#d97706";
 
 interface BtsPopupState {
   longitude: number;
@@ -73,7 +68,6 @@ interface MapViewProps {
   onDeviceClick: (device: Device) => void;
   onMapMove: (bounds: MapBounds, zoom: number) => void;
   showBts: boolean;
-  showCoverage: boolean;
   showBtsLines: boolean;
   geofences: GeofenceListItem[];
   showGeofences: boolean;
@@ -86,7 +80,6 @@ export default function MapView({
   onDeviceClick,
   onMapMove,
   showBts,
-  showCoverage,
   showBtsLines,
   geofences,
   showGeofences,
@@ -96,6 +89,9 @@ export default function MapView({
   const fittedRef = useRef(false);
   const [btsPopup, setBtsPopup] = useState<BtsPopupState | null>(null);
   const [devicePopup, setDevicePopup] = useState<DevicePopupState | null>(null);
+  // Trạm BTS được chọn → vẽ vùng phủ sóng cho trạm đó. Null = không vẽ.
+  // Đồng bộ với popup: mở popup trạm nào thì coverage hiện cho trạm đó.
+  const [selectedBtsId, setSelectedBtsId] = useState<number | null>(null);
 
   const reportBounds = useCallback(() => {
     if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
@@ -295,33 +291,28 @@ export default function MapView({
   }, [geoJsonData, showBts, connectedBtsIds]);
 
   const btsCoverage = useMemo<FeatureCollection<Polygon>>(() => {
-    if (!showCoverage || !geoJsonData)
+    // Chỉ vẽ vùng phủ sóng cho trạm đang chọn — hiển thị tất cả cùng lúc rất
+    // rối. User click trạm nào thì hiện coverage của trạm đó.
+    if (selectedBtsId == null || !geoJsonData)
       return { type: "FeatureCollection", features: [] };
-    const features = geoJsonData.features
-      .filter((f) => f.properties.type === "bts" && f.properties.id != null)
-      .flatMap((f) => {
-        const radius = coverageRadius(f.properties);
-        if (radius < 50) return [];
-        const id = f.properties.id!;
-        const isConnected = connectedBtsIds.has(id);
-        // Nếu showBts=false thì chỉ vẽ coverage cho BTS đang kết nối.
-        if (!showBts && !isConnected) return [];
-        return [
-          metersCircle(
-            Number(f.geometry.coordinates[0]),
-            Number(f.geometry.coordinates[1]),
-            radius,
-            {
-              id,
-              radius,
-              color: techColor(f.properties.radio),
-              radio: f.properties.radio,
-            },
-          ),
-        ];
-      });
-    return { type: "FeatureCollection", features };
-  }, [geoJsonData, showCoverage, showBts, connectedBtsIds]);
+    const target = geoJsonData.features.find(
+      (f) => f.properties.type === "bts" && f.properties.id === selectedBtsId,
+    );
+    if (!target) return { type: "FeatureCollection", features: [] };
+    const radius = coverageRadius(target.properties);
+    if (radius < 50) return { type: "FeatureCollection", features: [] };
+    return {
+      type: "FeatureCollection",
+      features: [
+        metersCircle(
+          Number(target.geometry.coordinates[0]),
+          Number(target.geometry.coordinates[1]),
+          radius,
+          { id: selectedBtsId, radius, radio: target.properties.radio },
+        ),
+      ],
+    };
+  }, [geoJsonData, selectedBtsId]);
 
   const clusterFeatures = useMemo<FeatureCollection<Point>>(() => {
     if (!geoJsonData || !showBts) return { type: "FeatureCollection", features: [] };
@@ -346,6 +337,7 @@ export default function MapView({
     // click đi qua <Marker onClick>, không lọt vào đây vì stopPropagation.
     setBtsPopup(null);
     setDevicePopup(null);
+    setSelectedBtsId(null);
   }, []);
 
   // Đổi con trỏ thành "pointer" khi hover lên BTS để cho biết có thể click.
@@ -400,13 +392,13 @@ export default function MapView({
         />
       </Source>
 
-      {/* Geofence vùng an toàn */}
+      {/* Geofence vùng an toàn — xanh lá để tách biệt khỏi cam coverage */}
       <Source id="geofence-rings" type="geojson" data={geofenceRings}>
         <Layer
           id="geofence-rings-fill"
           type="fill"
           paint={{
-            "fill-color": "#fbbf24",
+            "fill-color": "#22c55e",
             "fill-opacity": 0.1,
           }}
         />
@@ -414,7 +406,7 @@ export default function MapView({
           id="geofence-rings-line"
           type="line"
           paint={{
-            "line-color": "#f59e0b",
+            "line-color": "#16a34a",
             "line-width": 2,
             "line-dasharray": [6, 4],
             "line-opacity": 0.9,
@@ -422,24 +414,25 @@ export default function MapView({
         />
       </Source>
 
-      {/* BTS coverage — render TRƯỚC điểm để điểm không bị đè */}
+      {/* BTS coverage — render TRƯỚC điểm để điểm không bị đè. Chỉ hiện cho
+          trạm được chọn, dùng 1 màu cam thống nhất. */}
       <Source id="bts-coverage" type="geojson" data={btsCoverage}>
         <Layer
           id="bts-coverage-fill"
           type="fill"
           paint={{
-            "fill-color": ["get", "color"],
-            "fill-opacity": 0.08,
+            "fill-color": COVERAGE_COLOR,
+            "fill-opacity": 0.12,
           }}
         />
         <Layer
           id="bts-coverage-line"
           type="line"
           paint={{
-            "line-color": ["get", "color"],
+            "line-color": COVERAGE_COLOR,
             "line-width": 1.5,
             "line-dasharray": [6, 6],
-            "line-opacity": 0.7,
+            "line-opacity": 0.8,
           }}
         />
       </Source>
@@ -491,6 +484,7 @@ export default function MapView({
                 radius: b.radius,
                 isConnected: b.isConnected,
               });
+              setSelectedBtsId(b.id);
               setDevicePopup(null);
             }}
             className="block bg-transparent border-0 p-0 cursor-pointer"
@@ -566,6 +560,7 @@ export default function MapView({
                 onDeviceClick(d);
                 setDevicePopup({ device: d });
                 setBtsPopup(null);
+                setSelectedBtsId(null);
               }}
               className="block bg-transparent border-0 p-0 cursor-pointer"
               style={{ position: "relative", width, height }}
@@ -683,7 +678,10 @@ export default function MapView({
           anchor="bottom"
           offset={14}
           closeOnClick={false}
-          onClose={() => setBtsPopup(null)}
+          onClose={() => {
+            setBtsPopup(null);
+            setSelectedBtsId(null);
+          }}
         >
           <div
             style={{

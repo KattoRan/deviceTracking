@@ -6,7 +6,6 @@ import {
   Calendar,
   Clock,
   Loader2,
-  Mail,
   MapPin,
   Phone,
   Radio,
@@ -17,9 +16,9 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import deviceService from "@/services/deviceService";
-import type { Device, DeviceDetail } from "@/types/device";
+import type { CellTowerInfo, Device, DeviceDetail } from "@/types/device";
 import RemoteControlPanel from "./RemoteControlPanel";
 
 interface DeviceDetailPanelProps {
@@ -73,22 +72,6 @@ function formatCoord(val: number | null | undefined): string {
   return val == null ? "--" : val.toFixed(6);
 }
 
-function haversineMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6_371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
-
 function formatDistance(m: number | null): string {
   if (m == null) return "--";
   return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m} m`;
@@ -129,6 +112,37 @@ export default function DeviceDetailPanel({
   const signalDbm = servingCell?.signalDbm ?? detail?.cell?.signal_dbm ?? null;
   const signal = signalLevel(signalDbm);
   const isOnline = (detail?.status ?? device.status) === "online";
+
+  // Danh sách trạm kết nối — ưu tiên dữ liệu realtime từ socket (`device.cellTowers`).
+  // Khi chưa có socket update (mới mở panel), fallback về single serving cell
+  // từ `detail.cell` để user vẫn thấy thông tin ngay thay vì list rỗng.
+  const cellTowers = useMemo<CellTowerInfo[]>(() => {
+    if (device.cellTowers && device.cellTowers.length > 0) return device.cellTowers;
+    const c = detail?.cell;
+    if (
+      c &&
+      c.mcc != null &&
+      c.mnc != null &&
+      c.lac != null &&
+      c.cid != null &&
+      c.signal_dbm != null
+    ) {
+      return [
+        {
+          type: c.type ?? "",
+          mcc: c.mcc,
+          mnc: c.mnc,
+          lac: c.lac,
+          cid: c.cid,
+          pci: c.pci,
+          rssi: c.rssi,
+          signalDbm: c.signal_dbm,
+          isServing: true,
+        },
+      ];
+    }
+    return [];
+  }, [device.cellTowers, detail?.cell]);
 
   return (
     <motion.div
@@ -267,76 +281,36 @@ export default function DeviceDetailPanel({
             <div className="border-r border-slate-200 p-4">
               <SectionHeader icon={Clock} title="Cập nhật cuối" />
               <p className="text-sm font-medium text-slate-900">
-                {formatDateTime(detail?.last_seen ?? device.last_seen)}
+                {formatDateTime(device.last_seen ?? detail?.last_seen)}
               </p>
             </div>
             <div className="p-4">
               <SectionHeader icon={MapPin} title="Tọa độ" />
               <p className="font-mono text-sm font-medium text-slate-900">
-                {formatCoord(detail?.location?.latitude ?? device.latitude)}
+                {formatCoord(device.latitude ?? detail?.location?.latitude)}
               </p>
               <p className="font-mono text-sm font-medium text-slate-900">
-                {formatCoord(detail?.location?.longitude ?? device.longitude)}
+                {formatCoord(device.longitude ?? detail?.location?.longitude)}
               </p>
             </div>
           </div>
 
-          {(() => {
-            // Prefer the live socket-pushed BTS so this card updates in
-            // realtime. Fall back to the one-shot detail payload for fields
-            // the socket doesn't carry (e.g. when telemetry hasn't arrived
-            // since the panel opened).
-            const live = device.connectedBts;
-            const btsId = live?.id ?? detail?.bts?.id ?? null;
-            if (btsId == null) return null;
-            const radio = live?.radio ?? detail?.bts?.radio ?? null;
-            const range = live?.range ?? detail?.bts?.range ?? null;
-
-            const lat = device.latitude ?? detail?.location?.latitude ?? null;
-            const lon = device.longitude ?? detail?.location?.longitude ?? null;
-            const bLat = live?.lat ?? detail?.bts?.latitude ?? null;
-            const bLon = live?.lon ?? detail?.bts?.longitude ?? null;
-            const distanceM =
-              lat != null && lon != null && bLat != null && bLon != null
-                ? haversineMeters(lat, lon, bLat, bLon)
-                : (detail?.bts?.distance_m ?? null);
-
-            return (
-              <Section icon={Radio} title="Trạm BTS đang phục vụ">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-100 text-blue-600">
-                        <Radio className="h-3.5 w-3.5" />
-                      </div>
-                      <span className="text-sm font-semibold text-slate-900">
-                        #{btsId}
-                      </span>
-                    </div>
-                    {radio && (
-                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
-                        {radio}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-[10px] text-slate-500">Bán kính phủ</p>
-                      <p className="text-sm font-medium text-slate-900">
-                        {range != null ? `${(range / 1000).toFixed(1)} km` : "--"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-slate-500">Khoảng cách</p>
-                      <p className="text-sm font-medium text-slate-900">
-                        {formatDistance(distanceM)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </Section>
-            );
-          })()}
+          <Section icon={Radio} title="Trạm kết nối">
+            {cellTowers.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Chưa có dữ liệu trạm kết nối.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {cellTowers.map((c) => (
+                  <CellTowerRow
+                    key={`${c.mcc}-${c.mnc}-${c.lac}-${c.cid}`}
+                    cell={c}
+                  />
+                ))}
+              </ul>
+            )}
+          </Section>
 
           <Section icon={User} title="Thông tin thiết bị">
             <div className="space-y-2.5">
@@ -446,6 +420,56 @@ function InfoCard({
         {extra && <div className={accent || "text-slate-400"}>{extra}</div>}
       </div>
     </div>
+  );
+}
+
+function CellTowerRow({ cell }: { cell: CellTowerInfo }) {
+  const sig = signalLevel(cell.signalDbm);
+  return (
+    <li
+      className={`rounded-lg border p-2.5 ${
+        cell.isServing
+          ? "border-blue-200 bg-blue-50"
+          : "border-slate-200 bg-slate-50"
+      }`}
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          {cell.type && (
+            <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 ring-1 ring-slate-200">
+              {cell.type}
+            </span>
+          )}
+          <span className="font-mono text-xs font-semibold text-slate-900">
+            CID {cell.cid}
+          </span>
+        </div>
+        {cell.isServing && (
+          <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            Đang phục vụ
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-600">
+        <div>
+          <p className="text-[9px] uppercase tracking-wide text-slate-400">
+            Cường độ
+          </p>
+          <p className={`font-medium ${sig.color}`}>{cell.signalDbm} dBm</p>
+        </div>
+        <div>
+          <p className="text-[9px] uppercase tracking-wide text-slate-400">RSSI</p>
+          <p className="font-medium text-slate-900">{cell.rssi ?? "--"}</p>
+        </div>
+        <div>
+          <p className="text-[9px] uppercase tracking-wide text-slate-400">PCI</p>
+          <p className="font-medium text-slate-900">{cell.pci ?? "--"}</p>
+        </div>
+      </div>
+      <p className="mt-1.5 font-mono text-[10px] text-slate-500">
+        MCC {cell.mcc} · MNC {cell.mnc} · LAC {cell.lac}
+      </p>
+    </li>
   );
 }
 

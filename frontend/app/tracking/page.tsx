@@ -71,7 +71,6 @@ function TrackingPageInner() {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showBts, setShowBts] = useState(true);
-  const [showCoverage, setShowCoverage] = useState(false);
   const [showBtsLines, setShowBtsLines] = useState(true);
   const [geoJsonData, setGeoJsonData] = useState<BtsGeoJson | null>(null);
   const [btsLoading, setBtsLoading] = useState(false);
@@ -297,7 +296,6 @@ function TrackingPageInner() {
           onDeviceClick={setSelectedDevice}
           onMapMove={handleMapMove}
           showBts={showBts}
-          showCoverage={showCoverage}
           showBtsLines={showBtsLines}
           geofences={geofences}
           showGeofences={showGeofences}
@@ -306,8 +304,6 @@ function TrackingPageInner() {
         <MapControls
           showBts={showBts}
           onToggleBts={() => setShowBts((v) => !v)}
-          showCoverage={showCoverage}
-          onToggleCoverage={() => setShowCoverage((v) => !v)}
           showBtsLines={showBtsLines}
           onToggleBtsLines={() => setShowBtsLines((v) => !v)}
           showGeofences={showGeofences}

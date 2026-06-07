@@ -4,7 +4,6 @@ import {
   GitBranch,
   Radio,
   Shield,
-  Waves,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -12,8 +11,6 @@ import { cn } from "@/lib/utils";
 interface MapControlsProps {
   showBts: boolean;
   onToggleBts: () => void;
-  showCoverage: boolean;
-  onToggleCoverage: () => void;
   showBtsLines: boolean;
   onToggleBtsLines: () => void;
   showGeofences: boolean;
@@ -23,8 +20,6 @@ interface MapControlsProps {
 export default function MapControls({
   showBts,
   onToggleBts,
-  showCoverage,
-  onToggleCoverage,
   showBtsLines,
   onToggleBtsLines,
   showGeofences,
@@ -41,32 +36,20 @@ export default function MapControls({
         activeBg="bg-indigo-50 border-indigo-300"
       />
       <ControlBtn
-        icon={Waves}
-        label="Vùng phủ sóng"
-        active={showCoverage}
-        onClick={() => {
-          onToggleCoverage();
-          if (!showBts) onToggleBts();
-        }}
-        activeColor="text-sky-700"
-        activeBg="bg-sky-50 border-sky-300"
-        disabled={!showBts}
-      />
-      <ControlBtn
         icon={GitBranch}
         label="Đường kết nối BTS"
         active={showBtsLines}
         onClick={onToggleBtsLines}
-        activeColor="text-emerald-700"
-        activeBg="bg-emerald-50 border-emerald-300"
+        activeColor="text-sky-700"
+        activeBg="bg-sky-50 border-sky-300"
       />
       <ControlBtn
         icon={Shield}
         label="Vùng giám sát"
         active={showGeofences}
         onClick={onToggleGeofences}
-        activeColor="text-amber-700"
-        activeBg="bg-amber-50 border-amber-300"
+        activeColor="text-emerald-700"
+        activeBg="bg-emerald-50 border-emerald-300"
       />
     </div>
   );

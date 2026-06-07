@@ -29,9 +29,15 @@ export const GOONG_ATTRIBUTION =
   '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 
 /**
- * Ẩn các layer POI (poi-park, poi-railway, poi-airport, poi-tree, etc.)
+ * Xoá hẳn các layer POI (poi-park, poi-railway, poi-airport, poi-tree, etc.)
  * để map đỡ rối — chỉ giữ đường, label phố, tên địa danh, ranh giới hành
  * chính. Gọi từ onLoad của <Map>.
+ *
+ * Dùng `removeLayer` thay vì set visibility=none vì style Goong có layer
+ * `poi-tree` trỏ tới source-layer `trees` không tồn tại trong vector tile —
+ * nếu chỉ ẩn, MapLibre vẫn validate nó với từng tile và log error
+ * "Source layer 'trees' does not exist" liên tục. Remove thì layer biến mất
+ * khỏi style luôn, không còn validate.
  *
  * Giữ nguyên các layer `place-*` (tên thành phố, đảo, biển — bao gồm Hoàng
  * Sa/Trường Sa) và `highway-name-*`, `river-name-*` vì đó là context cần
@@ -39,17 +45,19 @@ export const GOONG_ATTRIBUTION =
  */
 export function hidePoiLayers(map: {
   getStyle: () => { layers?: Array<{ id: string }> } | undefined;
-  setLayoutProperty: (layerId: string, name: string, value: unknown) => void;
+  removeLayer: (layerId: string) => void;
 }): void {
   const style = map.getStyle();
   if (!style?.layers) return;
-  for (const layer of style.layers) {
-    if (layer.id.startsWith("poi-")) {
-      try {
-        map.setLayoutProperty(layer.id, "visibility", "none");
-      } catch {
-        // Layer có thể bị remove giữa lúc fire — bỏ qua.
-      }
+  // Snapshot ids trước khi remove vì xoá layer sẽ mutate style.layers.
+  const poiIds = style.layers
+    .map((l) => l.id)
+    .filter((id) => id.startsWith("poi-"));
+  for (const id of poiIds) {
+    try {
+      map.removeLayer(id);
+    } catch {
+      // Layer có thể đã bị remove ở pass khác / không tồn tại — bỏ qua.
     }
   }
 }
