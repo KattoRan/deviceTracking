@@ -30,11 +30,6 @@ import {
   sendHeartbeat,
   sendIngestData,
 } from '../services/apiService';
-import {
-  isBackgroundLocationActive,
-  startBackgroundLocation,
-  stopBackgroundLocation,
-} from '../services/backgroundLocationService';
 import { getCellTowerInfo } from '../services/cellInfoService';
 import {
   connectMqtt,
@@ -68,8 +63,6 @@ export default function TrackingScreen() {
 
   const [isActive, setIsActive] = useState(false);
   const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_TRACKING_INTERVAL_MS);
-  const [bgActive, setBgActive] = useState(false);
-  const [bgToggling, setBgToggling] = useState(false);
   const [parentContact, setParentContact] = useState<ParentContact | null>(null);
   const [contactLoading, setContactLoading] = useState(true);
   const [sosResult, setSosResult] = useState<{
@@ -264,17 +257,6 @@ export default function TrackingScreen() {
     });
   }, []);
 
-  // Sync trạng thái background task với UI khi mount.
-  useEffect(() => {
-    let cancelled = false;
-    void isBackgroundLocationActive().then((active) => {
-      if (!cancelled) setBgActive(active);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Fetch parent contact info once we have a deviceId. Showing parent name
   // and phone on this screen so the monitored person can always call back
   // is the whole reason the field exists in parent_accounts.
@@ -316,26 +298,6 @@ export default function TrackingScreen() {
     });
     return () => sub.remove();
   }, [storedData?.deviceId]);
-
-  const toggleBackground = useCallback(async () => {
-    if (bgToggling) return;
-    setBgToggling(true);
-    try {
-      if (bgActive) {
-        await stopBackgroundLocation();
-        setBgActive(false);
-      } else {
-        const res = await startBackgroundLocation();
-        if (res.ok) {
-          setBgActive(true);
-        } else if (res.reason) {
-          Alert.alert('Không bật được nền', res.reason);
-        }
-      }
-    } finally {
-      setBgToggling(false);
-    }
-  }, [bgActive, bgToggling]);
 
   // Auto-dismiss SOS feedback after 3s.
   useEffect(() => {
@@ -495,48 +457,6 @@ export default function TrackingScreen() {
           </Text>
         </View>
 
-        <View style={styles.card}>
-          <View style={styles.headerRow}>
-            <Text style={styles.cardTitle}>Theo dõi nền</Text>
-            <View
-              style={[
-                styles.badge,
-                bgActive ? styles.badgeActive : styles.badgeIdle,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.badgeText,
-                  bgActive ? styles.badgeTextActive : styles.badgeTextIdle,
-                ]}
-              >
-                {bgActive ? 'Đang chạy' : 'Tắt'}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.placeholder}>
-            Khi bật, ứng dụng tiếp tục gửi vị trí ngay cả khi đóng app. Cần cấp
-            quyền &quot;Luôn cho phép&quot; truy cập vị trí.
-          </Text>
-          <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              bgActive ? styles.stopBtn : styles.startBtn,
-            ]}
-            onPress={toggleBackground}
-            activeOpacity={0.7}
-            disabled={bgToggling}
-          >
-            {bgToggling ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.toggleText}>
-                {bgActive ? 'Tắt theo dõi nền' : 'Bật theo dõi nền'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
         {locationError && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{locationError}</Text>
@@ -603,15 +523,6 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 12, fontWeight: '600' },
   badgeTextActive: { color: '#2E7D32' },
   badgeTextIdle: { color: '#757575' },
-  toggleBtn: {
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  startBtn: { backgroundColor: '#4CAF50' },
-  stopBtn: { backgroundColor: '#F44336' },
-  toggleText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -16,9 +16,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.katto.devicetracking",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Ứng dụng cần truy cập vị trí để gửi telemetry GPS và BTS về máy chủ.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Ứng dụng cần truy cập vị trí kể cả khi đóng app để phụ huynh có thể giám sát liên tục và nhận cảnh báo khi rời khỏi vùng an toàn.",
-        "UIBackgroundModes": ["location", "fetch"]
+        "NSLocationWhenInUseUsageDescription": "Ứng dụng cần truy cập vị trí để gửi telemetry GPS và BTS về máy chủ."
       }
     },
     "android": {
@@ -32,9 +30,6 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION",
         "POST_NOTIFICATIONS",
         "READ_PHONE_STATE"
       ]
@@ -46,10 +41,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Ứng dụng cần truy cập vị trí kể cả khi đóng app để phụ huynh giám sát liên tục.",
-          "locationWhenInUsePermission": "Ứng dụng cần truy cập vị trí để gửi telemetry GPS về máy chủ.",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "locationWhenInUsePermission": "Ứng dụng cần truy cập vị trí để gửi telemetry GPS về máy chủ."
         }
       ]
     ]
