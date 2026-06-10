@@ -53,10 +53,23 @@ function haversineMeters(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// H3 — dedup emit `device_moved`. Khi mobile ở tick rate cao (5s) + user
+// đứng yên + movement filter mobile-side bị bypass (vd lệnh force) → server
+// vẫn nhận stream fix gần như identical. Skip emit nếu di chuyển <2m so
+// emit trước AND <10s từ emit cũ. KHÔNG skip persist (history audit đầy đủ).
+const EMIT_DEDUP_DISTANCE_M = 2;
+const EMIT_DEDUP_TIME_MS = 10_000;
+
 @Injectable()
 export class IngestService {
   private readonly logger = new Logger(IngestService.name);
   private readonly btsQueue = new ConcurrencyQueue(2);
+  // In-memory cache cho dedup. Map<deviceId, {lat, lon, t}>. Reset khi
+  // server restart — acceptable, lần emit kế tiếp sẽ luôn fire.
+  private readonly lastEmit = new Map<
+    string,
+    { lat: number; lon: number; t: number }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -65,6 +78,18 @@ export class IngestService {
     private readonly geofenceState: GeofenceStateService,
     private readonly alerts: AlertsService,
   ) {}
+
+  /** Trả true nếu emit này quá gần (cả không gian + thời gian) emit trước → skip. */
+  private shouldSkipEmit(deviceId: string, lat: number, lon: number): boolean {
+    const prev = this.lastEmit.get(deviceId);
+    if (!prev) return false;
+    if (Date.now() - prev.t > EMIT_DEDUP_TIME_MS) return false;
+    return haversineMeters(lat, lon, prev.lat, prev.lon) < EMIT_DEDUP_DISTANCE_M;
+  }
+
+  private markEmitted(deviceId: string, lat: number, lon: number): void {
+    this.lastEmit.set(deviceId, { lat, lon, t: Date.now() });
+  }
 
   async saveData(
     deviceId: string,
@@ -161,31 +186,36 @@ export class IngestService {
       }
     }
 
-    this.eventsGateway.emitDeviceMoved({
-      deviceId,
-      lat: latest.latitude,
-      lon: latest.longitude,
-      accuracy: latest.accuracy ?? null,
-      quality: latestQuality,
-      cid: servingCell?.cid ?? null,
-      lac: servingCell?.lac ?? null,
-      signalDbm: servingCell?.signalDbm ?? null,
-      timestamp: latestAt.toISOString(),
-      cellTowers: cells.map((c) => ({
-        type: c.type,
-        mcc: c.mcc,
-        mnc: c.mnc,
-        lac: c.lac,
-        cid: c.cid,
-        pci: c.pci ?? null,
-        rssi: c.rssi ?? null,
-        signalDbm: c.signalDbm ?? null,
-        isServing: c.isServing,
-      })),
-      connectedBts,
-      spoofingSuspected,
-      gpsBtsDistanceM,
-    });
+    // Dedup: skip emit nếu near-identical position trong cửa sổ time ngắn.
+    // Vẫn persist history bình thường (xem persistInBackground dưới).
+    if (!this.shouldSkipEmit(deviceId, latest.latitude, latest.longitude)) {
+      this.eventsGateway.emitDeviceMoved({
+        deviceId,
+        lat: latest.latitude,
+        lon: latest.longitude,
+        accuracy: latest.accuracy ?? null,
+        quality: latestQuality,
+        cid: servingCell?.cid ?? null,
+        lac: servingCell?.lac ?? null,
+        signalDbm: servingCell?.signalDbm ?? null,
+        timestamp: latestAt.toISOString(),
+        cellTowers: cells.map((c) => ({
+          type: c.type,
+          mcc: c.mcc,
+          mnc: c.mnc,
+          lac: c.lac,
+          cid: c.cid,
+          pci: c.pci ?? null,
+          rssi: c.rssi ?? null,
+          signalDbm: c.signalDbm ?? null,
+          isServing: c.isServing,
+        })),
+        connectedBts,
+        spoofingSuspected,
+        gpsBtsDistanceM,
+      });
+      this.markEmitted(deviceId, latest.latitude, latest.longitude);
+    }
 
     void this.persistInBackground(
       deviceId,
