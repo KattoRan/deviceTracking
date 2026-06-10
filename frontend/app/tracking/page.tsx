@@ -141,12 +141,8 @@ function TrackingPageInner() {
   // Heartbeat: device còn sống nhưng KHÔNG có fix GPS mới. Refresh
   // last_seen + status + pin, cập nhật realtime cellTowers + connectedBts
   // (cha mẹ vẫn thấy trạm đang nối thay đổi khi user di chuyển trong vùng
-  // mất GPS). KHÔNG đụng lat/lon — marker giữ ở fix GPS cuối.
-  //
-  // `lastGpsAt`: bump khi heartbeat có cellTowers (mobile vẫn sampling stack
-  // vị trí bình thường — có thể user đứng yên + mobile gate /ingest). Không
-  // bump khi cells rỗng (Location toggle off / airplane mode / native fail)
-  // → badge "GPS mất" fire sau 60s như cũ.
+  // mất GPS). KHÔNG đụng lat/lon/quality/lastGpsAt — marker ở fix GPS cuối,
+  // chênh lệch (now - lastGpsAt) chính là thời gian mất GPS.
   const handleDeviceHeartbeat = useCallback((event: DeviceHeartbeatEvent) => {
     const patch: Partial<Device> = {
       last_seen: event.timestamp,
@@ -155,9 +151,6 @@ function TrackingPageInner() {
       connectedBts: event.connectedBts,
     };
     if (event.batteryLevel != null) patch.last_battery = event.batteryLevel;
-    if (event.cellTowers.length > 0) {
-      patch.lastGpsAt = event.timestamp;
-    }
     setDevices((prev) =>
       prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
     );
