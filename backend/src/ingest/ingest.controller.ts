@@ -1,6 +1,5 @@
 import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { HeartbeatDto } from './dto/heartbeat.dto';
 import { SubmitDataDto } from './dto/submit-data.dto';
 import { IngestService } from './ingest.service';
 
@@ -11,28 +10,18 @@ export class IngestController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'HTTP fallback nhận telemetry (thay thế MQTT)' })
+  @ApiOperation({
+    summary: 'Telemetry endpoint duy nhất (gộp ingest + heartbeat)',
+    description:
+      'Mobile gửi cả khi có lẫn không có fix GPS mới. locations non-empty → ' +
+      'lưu location_history + emit device_moved. locations empty/omit → chỉ ' +
+      'refresh last_seen + emit device_heartbeat.',
+  })
   @ApiHeader({ name: 'x-device-id', required: true })
   ingest(
     @Body() dto: SubmitDataDto,
     @Headers('x-device-id') deviceId: string,
   ) {
     return this.ingestService.saveData(deviceId, dto);
-  }
-
-  @Post('heartbeat')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Heartbeat khi device đứng yên',
-    description:
-      'Mobile gọi mỗi tick khi watcher không emit fix mới. Chỉ refresh ' +
-      'last_seen + last_battery, không insert location_history.',
-  })
-  @ApiHeader({ name: 'x-device-id', required: true })
-  heartbeat(
-    @Body() dto: HeartbeatDto,
-    @Headers('x-device-id') deviceId: string,
-  ) {
-    return this.ingestService.heartbeat(deviceId, dto);
   }
 }

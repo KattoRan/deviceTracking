@@ -10,7 +10,6 @@ import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { HeartbeatDto } from './dto/heartbeat.dto';
 import { LocationDto, SubmitDataDto } from './dto/submit-data.dto';
 import {
   ConcurrencyQueue,
@@ -91,12 +90,24 @@ export class IngestService {
     this.lastEmit.set(deviceId, { lat, lon, t: Date.now() });
   }
 
+  /**
+   * Unified telemetry endpoint. Trước kia split thành /ingest (có locations)
+   * và /heartbeat (không locations); giờ gộp 1 path code, branch theo
+   * `dto.locations` có hay không.
+   *
+   *   - `locations` non-empty → flow ingest đầy đủ: persist location_history,
+   *     emit `device_moved`, eval geofence, spoof check, …
+   *   - `locations` empty/omit → flow heartbeat: chỉ refresh last_seen,
+   *     low-battery transition, emit `device_heartbeat`.
+   *
+   * Bước common (resolve serving cell + connectedBts, lookup BTS) chạy ở
+   * cả 2 nhánh để cha mẹ luôn thấy "đang nối trạm nào" realtime.
+   */
   async saveData(
     deviceId: string,
     dto: SubmitDataDto,
   ): Promise<{ success: true; message: string }> {
     if (!deviceId) throw new BadRequestException('Missing device id');
-    if (!dto?.locations?.length) throw new BadRequestException('Missing locations');
 
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
@@ -105,6 +116,8 @@ export class IngestService {
         person_name: true,
         phone_number: true,
         parent_account_id: true,
+        is_low_battery_alerted: true,
+        is_offline_alerted: true,
         device_geofences: {
           include: {
             geofence: {
@@ -116,14 +129,7 @@ export class IngestService {
     });
     if (!device) throw new NotFoundException('Device not found');
 
-    // The client guarantees locations are ordered oldest → newest, so the
-    // latest fix is the last element. We use this for all "current state"
-    // computations (realtime broadcast, geofence eval, last_seen) while
-    // every fix in the batch — including this one — gets persisted.
-    const latest = dto.locations[dto.locations.length - 1];
-    const latestAt = new Date(latest.timestamp);
-    const latestQuality = deriveQuality(latest);
-
+    // ── Common: resolve serving cell + connectedBts ───────────────────────
     const validCells = (dto.cellTowers ?? []).filter(isValidCell);
     const cells = validCells.length > 0 ? markServingCell(validCells) : [];
     const servingCell = cells.find((c) => c.isServing) ?? null;
@@ -156,175 +162,112 @@ export class IngestService {
           range: row.range,
         };
       }
-    }
-
-    // --- GPS spoofing detection ---
-    // Fake-GPS apps change the OS location but cannot change which cell
-    // tower the modem is attached to. If the reported GPS position is
-    // unreasonably far from the connected BTS, the fix is likely spoofed.
-    //
-    // Chỉ gate cho fix tier `gps` — fix `approx`/`network` đã biết là imprecise
-    // (WiFi/cell-based hoặc cell-locate fallback), so với center BTS có thể
-    // lệch cả km một cách hợp lệ → không có nghĩa để chấm spoofing.
-    const SPOOF_RANGE_MULTIPLIER = 2;
-    const DEFAULT_BTS_RANGE_M = 2000; // fallback when BTS has no range data
-    let spoofingSuspected = false;
-    let gpsBtsDistanceM: number | null = null;
-    if (connectedBts && latestQuality === 'gps') {
-      gpsBtsDistanceM = Math.round(
-        haversineMeters(latest.latitude, latest.longitude, connectedBts.lat, connectedBts.lon),
-      );
-      const btsRange = connectedBts.range ?? DEFAULT_BTS_RANGE_M;
-      spoofingSuspected = gpsBtsDistanceM > btsRange * SPOOF_RANGE_MULTIPLIER;
-      if (spoofingSuspected) {
-        this.logger.warn(
-          `GPS SPOOFING suspected device=${deviceId} ` +
-            `gps=(${latest.latitude},${latest.longitude}) ` +
-            `bts=(${connectedBts.lat},${connectedBts.lon}) ` +
-            `dist=${gpsBtsDistanceM}m range=${btsRange}m`,
-        );
-      }
-    }
-
-    // Dedup: skip emit nếu near-identical position trong cửa sổ time ngắn.
-    // Vẫn persist history bình thường (xem persistInBackground dưới).
-    if (!this.shouldSkipEmit(deviceId, latest.latitude, latest.longitude)) {
-      this.eventsGateway.emitDeviceMoved({
-        deviceId,
-        lat: latest.latitude,
-        lon: latest.longitude,
-        accuracy: latest.accuracy ?? null,
-        quality: latestQuality,
-        cid: servingCell?.cid ?? null,
-        lac: servingCell?.lac ?? null,
-        signalDbm: servingCell?.signalDbm ?? null,
-        timestamp: latestAt.toISOString(),
-        cellTowers: cells.map((c) => ({
-          type: c.type,
-          mcc: c.mcc,
-          mnc: c.mnc,
-          lac: c.lac,
-          cid: c.cid,
-          pci: c.pci ?? null,
-          rssi: c.rssi ?? null,
-          signalDbm: c.signalDbm ?? null,
-          isServing: c.isServing,
-        })),
-        connectedBts,
-        spoofingSuspected,
-        gpsBtsDistanceM,
-      });
-      this.markEmitted(deviceId, latest.latitude, latest.longitude);
-    }
-
-    void this.persistInBackground(
-      deviceId,
-      dto.locations,
-      cells,
-      latestAt,
-      dto.batteryLevel,
-      device.person_name,
-      device.parent_account_id,
-    );
-    if (servingCell) void this.lookupBtsInBackground(servingCell);
-
-    // Consumer policy: only fixes the OS confirmed as real GNSS feed the
-    // geofence evaluator. WiFi/cell-based fixes drift hundreds of metres
-    // around a stationary device — running the breach check on them
-    // produces phantom "ra khỏi vùng" alerts. Also skip when GPS spoofing
-    // is suspected.
-    if (device.device_geofences.length > 0 && latestQuality === 'gps' && !spoofingSuspected) {
-      void this.evaluateDeviceZones(
-        deviceId,
-        device.person_name,
-        device.parent_account_id,
-        latest.latitude,
-        latest.longitude,
-        device.device_geofences.map((dg) => dg.geofence),
-        latestAt,
-      );
-    }
-
-    return { success: true, message: 'Data received' };
-  }
-
-  /**
-   * Heartbeat — device còn sống nhưng không có fix GPS mới.
-   *
-   * Khác với saveData:
-   *   - KHÔNG insert location_history / cell_tower_history
-   *   - KHÔNG chạy geofence eval (không có toạ độ mới để check)
-   *   - KHÔNG broadcast device_moved (FE dùng device_heartbeat riêng để
-   *     refresh last_seen mà không phải overwrite lat/lon)
-   *
-   * Vẫn làm:
-   *   - Cập nhật devices.last_seen + last_battery
-   *   - Low-battery arm/disarm transition + push như ingest
-   *   - Clear is_offline_alerted (device vừa thở → online lại)
-   *   - Emit battery_update cho dashboard meter
-   *   - Emit device_heartbeat cho FE update UI
-   */
-  async heartbeat(
-    deviceId: string,
-    dto: HeartbeatDto,
-  ): Promise<{ success: true }> {
-    if (!deviceId) throw new BadRequestException('Missing device id');
-
-    // Resolve serving cell + connectedBts từ payload heartbeat. KHÔNG gọi
-    // Combain locate — toạ độ trạm đã có sẵn trong DB (`bts_stations`),
-    // không cần triangulate vì kết quả cũng chỉ trả về tâm trạm với accuracy
-    // = bán kính phủ (vô nghĩa định vị). Thay vào đó emit cellTowers +
-    // connectedBts qua `device_heartbeat` để FE tự highlight vùng phủ + đếm
-    // "GPS mất N phút" mà không cần move marker.
-    const validCells = (dto.cellTowers ?? []).filter(isValidCell);
-    const cells = validCells.length > 0 ? markServingCell(validCells) : [];
-    const servingCell = cells.find((c) => c.isServing) ?? null;
-
-    let connectedBts: {
-      id: number;
-      lat: number;
-      lon: number;
-      radio: string | null;
-      range: number | null;
-    } | null = null;
-    if (servingCell) {
-      const row = await this.prisma.bts_stations.findUnique({
-        where: {
-          mcc_mnc_lac_cid: {
-            mcc: servingCell.mcc,
-            mnc: servingCell.mnc,
-            lac: servingCell.lac,
-            cid: servingCell.cid,
-          },
-        },
-        select: { id: true, lat: true, lon: true, radio: true, range: true },
-      });
-      if (row) {
-        connectedBts = {
-          id: row.id,
-          lat: Number(row.lat),
-          lon: Number(row.lon),
-          radio: row.radio,
-          range: row.range,
-        };
-      }
-      // Background lookup nếu BTS chưa có trong DB — lần heartbeat sau đã
-      // có row, connectedBts sẽ được trả về trong event.
+      // Lookup Combain async nếu cell mới — lần ingest sau sẽ có row.
       void this.lookupBtsInBackground(servingCell);
     }
 
-    const device = await this.prisma.devices.findUnique({
-      where: { id: deviceId },
-      select: {
-        id: true,
-        person_name: true,
-        parent_account_id: true,
-        is_low_battery_alerted: true,
-        is_offline_alerted: true,
-      },
-    });
-    if (!device) throw new NotFoundException('Device not found');
+    const cellTowersPayload = cells.map((c) => ({
+      type: c.type,
+      mcc: c.mcc,
+      mnc: c.mnc,
+      lac: c.lac,
+      cid: c.cid,
+      pci: c.pci ?? null,
+      rssi: c.rssi ?? null,
+      signalDbm: c.signalDbm ?? null,
+      isServing: c.isServing,
+    }));
 
+    const hasLocations = (dto.locations?.length ?? 0) > 0;
+
+    // ══ Nhánh INGEST (có locations) ═══════════════════════════════════════
+    if (hasLocations) {
+      // Client guarantee oldest→newest, latest fix dùng cho realtime + eval.
+      const locations = dto.locations!;
+      const latest = locations[locations.length - 1];
+      const latestAt = new Date(latest.timestamp);
+      const latestQuality = deriveQuality(latest);
+
+      // Spoofing detect (chỉ tier gps). Fake-GPS app đổi OS location nhưng
+      // không đổi cell device đang attach → khoảng cách bất thường = nghi vấn.
+      const SPOOF_RANGE_MULTIPLIER = 2;
+      const DEFAULT_BTS_RANGE_M = 2000;
+      let spoofingSuspected = false;
+      let gpsBtsDistanceM: number | null = null;
+      if (connectedBts && latestQuality === 'gps') {
+        gpsBtsDistanceM = Math.round(
+          haversineMeters(
+            latest.latitude,
+            latest.longitude,
+            connectedBts.lat,
+            connectedBts.lon,
+          ),
+        );
+        const btsRange = connectedBts.range ?? DEFAULT_BTS_RANGE_M;
+        spoofingSuspected = gpsBtsDistanceM > btsRange * SPOOF_RANGE_MULTIPLIER;
+        if (spoofingSuspected) {
+          this.logger.warn(
+            `GPS SPOOFING suspected device=${deviceId} ` +
+              `gps=(${latest.latitude},${latest.longitude}) ` +
+              `bts=(${connectedBts.lat},${connectedBts.lon}) ` +
+              `dist=${gpsBtsDistanceM}m range=${btsRange}m`,
+          );
+        }
+      }
+
+      // Dedup emit nếu near-identical trong cửa sổ ngắn — vẫn persist DB.
+      if (!this.shouldSkipEmit(deviceId, latest.latitude, latest.longitude)) {
+        this.eventsGateway.emitDeviceMoved({
+          deviceId,
+          lat: latest.latitude,
+          lon: latest.longitude,
+          accuracy: latest.accuracy ?? null,
+          quality: latestQuality,
+          cid: servingCell?.cid ?? null,
+          lac: servingCell?.lac ?? null,
+          signalDbm: servingCell?.signalDbm ?? null,
+          timestamp: latestAt.toISOString(),
+          cellTowers: cellTowersPayload,
+          connectedBts,
+          spoofingSuspected,
+          gpsBtsDistanceM,
+          lastFixAt: dto.lastFixAt ?? latest.timestamp,
+        });
+        this.markEmitted(deviceId, latest.latitude, latest.longitude);
+      }
+
+      void this.persistInBackground(
+        deviceId,
+        locations,
+        cells,
+        latestAt,
+        dto.batteryLevel,
+        device.person_name,
+        device.parent_account_id,
+      );
+
+      // Geofence eval chỉ với fix tier gps + không nghi spoof — fix
+      // approx/network drift hàng trăm m gây phantom breach.
+      if (
+        device.device_geofences.length > 0 &&
+        latestQuality === 'gps' &&
+        !spoofingSuspected
+      ) {
+        void this.evaluateDeviceZones(
+          deviceId,
+          device.person_name,
+          device.parent_account_id,
+          latest.latitude,
+          latest.longitude,
+          device.device_geofences.map((dg) => dg.geofence),
+          latestAt,
+        );
+      }
+
+      return { success: true, message: 'Data received' };
+    }
+
+    // ══ Nhánh HEARTBEAT (không locations) ═════════════════════════════════
     const batteryLevel = dto.batteryLevel;
     const now = new Date();
     const LOW_BATTERY_THRESHOLD = 20;
@@ -366,18 +309,9 @@ export class IngestService {
       deviceId,
       batteryLevel: batteryLevel ?? null,
       timestamp: now.toISOString(),
-      cellTowers: cells.map((c) => ({
-        type: c.type,
-        mcc: c.mcc,
-        mnc: c.mnc,
-        lac: c.lac,
-        cid: c.cid,
-        pci: c.pci ?? null,
-        rssi: c.rssi ?? null,
-        signalDbm: c.signalDbm ?? null,
-        isServing: c.isServing,
-      })),
+      cellTowers: cellTowersPayload,
       connectedBts,
+      lastFixAt: dto.lastFixAt ?? null,
     });
 
     if (batteryLevel != null) {
@@ -404,7 +338,7 @@ export class IngestService {
       );
     }
 
-    return { success: true };
+    return { success: true, message: 'Heartbeat received' };
   }
 
   /**

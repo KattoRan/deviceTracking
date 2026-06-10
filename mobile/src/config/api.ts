@@ -18,7 +18,6 @@ export const MQTT_URL =
 export const API_ENDPOINTS = {
   PAIR_DEVICE: 'api/v1/devices/pair',
   INGEST: 'api/v1/ingest',
-  HEARTBEAT: 'api/v1/ingest/heartbeat',
   SOS: 'api/v1/devices/sos',
   COMMANDS_POLL: 'api/v1/devices/commands/poll',
   // Result endpoint nhận :commandId — ghép tại call-site.

@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -9,6 +8,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
@@ -100,20 +101,28 @@ export class CellTowerDto {
   isPrimary?: boolean;
 }
 
+/**
+ * Unified telemetry payload. Mobile gửi cùng endpoint cả khi có lẫn không có
+ * fix GPS mới.
+ *
+ *   - `locations` non-empty → server lưu location_history, emit `device_moved`.
+ *   - `locations` empty/omit → server chỉ refresh last_seen + emit `device_heartbeat`.
+ *
+ * Trước kia split thành /ingest và /heartbeat; gộp lại giúp mobile chỉ có 1
+ * path code và schema đơn giản hơn.
+ */
 export class SubmitDataDto {
   /**
-   * Ordered oldest → newest. Every watcher fix observed during one send
-   * window is shipped in one payload, so the server can reconstruct the
-   * trajectory between ticks rather than only seeing the latest point.
-   * Always at least one element — the mobile client falls back to the
-   * last known fix as a single-element heartbeat when the user is still.
+   * Ordered oldest → newest fix GPS trong cửa sổ gửi. Có thể empty/omit nếu
+   * không có fix mới (user đứng yên hoặc mất GPS) — server xử lý như
+   * heartbeat-only.
    */
-  @ApiProperty({ type: [LocationDto] })
+  @ApiPropertyOptional({ type: [LocationDto] })
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => LocationDto)
-  locations: LocationDto[];
+  locations?: LocationDto[];
 
   @ApiPropertyOptional({ type: [CellTowerDto] })
   @IsOptional()
@@ -129,5 +138,17 @@ export class SubmitDataDto {
   @ApiPropertyOptional({ example: 42, minimum: 0, maximum: 100 })
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(100)
   batteryLevel?: number;
+
+  /**
+   * Epoch ms của fix GPS gần nhất mobile có (kể cả không gửi vì gating
+   * movement). Server forward qua socket event → FE biết "GPS có hoạt động
+   * không" chính xác, không bị false positive khi user đứng yên.
+   */
+  @ApiPropertyOptional({ example: 1731000000000 })
+  @IsOptional()
+  @IsInt()
+  lastFixAt?: number;
 }

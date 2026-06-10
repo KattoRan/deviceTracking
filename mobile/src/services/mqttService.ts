@@ -1,6 +1,6 @@
 import mqtt, { type MqttClient } from 'mqtt';
 import { MQTT_CONFIG } from '../config/api';
-import type { HeartbeatPayload, IngestPayload } from '../models/types';
+import type { IngestPayload } from '../models/types';
 
 type ConnectionListener = (connected: boolean) => void;
 
@@ -72,29 +72,6 @@ export function publishTelemetry(
     }
     client.publish(
       `device/${deviceId}/telemetry`,
-      JSON.stringify(payload),
-      { qos: 1 },
-      (err) => resolve(!err),
-    );
-  });
-}
-
-/**
- * Publishes heartbeat on `device/{deviceId}/heartbeat` với QoS 1.
- * Cùng pattern fail-soft như publishTelemetry — caller fallback HTTP nếu
- * resolve `false`.
- */
-export function publishHeartbeat(
-  deviceId: string,
-  payload: HeartbeatPayload,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (!client || !connected) {
-      resolve(false);
-      return;
-    }
-    client.publish(
-      `device/${deviceId}/heartbeat`,
       JSON.stringify(payload),
       { qos: 1 },
       (err) => resolve(!err),

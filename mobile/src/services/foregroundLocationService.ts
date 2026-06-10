@@ -7,7 +7,7 @@ import { Vibration } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
-import { publishHeartbeat, publishTelemetry } from './mqttService';
+import { publishTelemetry } from './mqttService';
 
 export const FOREGROUND_LOCATION_TASK = 'foreground-location-task';
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
@@ -86,6 +86,11 @@ let cellCache: {
 // fire khi app minimized). Unsubscribe khi service stop để khỏi tốn pin.
 let accelSubscription: { remove: () => void } | null = null;
 const accelBuffer: number[] = [];
+
+// Epoch ms của fix GPS mới nhất từ OS — cập nhật mỗi tick task có fix hợp lệ,
+// kể cả khi fix bị movement gate skip không gửi server. FE dùng làm dấu mốc
+// "GPS thực sự hoạt động" → không bị false GPS-lost badge khi user đứng yên.
+let lastFixTime: number | null = null;
 
 function subscribeAccelerometer(): void {
   if (accelSubscription) return;
@@ -175,8 +180,18 @@ async function loadStoredDeviceId(): Promise<string | null> {
 async function appendBuffer(fixes: LocationData[]): Promise<void> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
   const existing: LocationData[] = raw ? (JSON.parse(raw) as LocationData[]) : [];
+  // Dedup theo timestamp — Android 14 (đặc biệt khi battery save) đôi khi
+  // ignore `timeInterval` và deliver same fix nhiều lần với cùng `loc.timestamp`.
+  // Không dedup sẽ làm buffer phình lên 50 entries identical → server insert
+  // 50 row hệt nhau mỗi flush.
+  const merged: LocationData[] = [...existing];
+  for (const f of fixes) {
+    const last = merged[merged.length - 1];
+    if (last && last.timestamp === f.timestamp) continue;
+    merged.push(f);
+  }
   // Cap 500 điểm — nếu offline lâu thì giữ những điểm gần nhất.
-  const capped = existing.concat(fixes).slice(-500);
+  const capped = merged.slice(-500);
   await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(capped));
 }
 
@@ -194,154 +209,118 @@ async function readBatteryLevel(): Promise<number | undefined> {
 }
 
 /**
- * Flush buffer LEN /ingest nếu di chuyển ≥ MOVEMENT_THRESHOLD_M từ lần gửi
- * trước, hoặc force=true (vd lệnh request_location_now). Đứng yên → return
- * false, caller sẽ fall back về heartbeat.
+ * Build buffer ready để gửi — drop fix quá cũ, áp movement gate. Trả về
+ * `{ toSend, remaining }` nếu nên gửi /ingest có locations; `null` nếu nên
+ * gửi heartbeat-only (đứng yên / chưa di chuyển đủ / buffer rỗng).
  */
-async function flushBufferIfMoved(
-  deviceId: string,
+async function prepareIngest(
   force: boolean,
-): Promise<boolean> {
+): Promise<{ toSend: LocationData[]; remaining: LocationData[] } | null> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
-  if (!raw) return false;
+  if (!raw) return null;
   let buffer: LocationData[] = JSON.parse(raw);
   // Drop fix quá cũ — tránh push rác lên server khi user mở app lại từ
   // session cũ hoặc sau khi admin reset data.
   const cutoff = Date.now() - BUFFER_MAX_AGE_MS;
   const filtered = buffer.filter((f) => f.timestamp >= cutoff);
   if (filtered.length !== buffer.length) {
-    if (filtered.length === 0) {
-      await clearBuffer();
-    } else {
-      await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(filtered));
-    }
+    if (filtered.length === 0) await clearBuffer();
+    else await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(filtered));
     buffer = filtered;
   }
-  if (buffer.length === 0) return false;
+  if (buffer.length === 0) return null;
 
   const latest = buffer[buffer.length - 1];
   if (!force) {
     const last = await getLastSent();
-    // Khi đang đứng yên (accelerometer variance thấp), tăng movement threshold
-    // để lọc thêm GPS jitter — fix lệch 5-10m do noise sẽ bị skip thay vì
-    // gửi như "movement". Khi MOVING, dùng threshold default 5m.
-    const threshold = isStill()
-      ? MOVEMENT_STILL_THRESHOLD_M
-      : MOVEMENT_THRESHOLD_M;
+    // STILL → threshold 10m (lọc GPS jitter). MOVING → 5m default.
+    const threshold = isStill() ? MOVEMENT_STILL_THRESHOLD_M : MOVEMENT_THRESHOLD_M;
     if (
       last &&
       haversineMeters(latest.latitude, latest.longitude, last.lat, last.lon) <
         threshold
     ) {
-      // Chưa di chuyển đủ — KHÔNG flush, giữ buffer để lần sau gửi gộp.
-      // Lưu ý: buffer có thể phình to nếu user đứng yên rất lâu, nhưng cap
-      // 500 ở appendBuffer đã handle (drop điểm cũ).
-      return false;
+      return null;
     }
   }
-
-  const toSend = buffer.slice(0, FLUSH_BATCH_LIMIT);
-  const remaining = buffer.slice(toSend.length);
-  const batteryLevel = await readBatteryLevel();
-  const cellTowers = await getCachedCells();
-  const payload = {
-    locations: toSend,
-    cellTowers,
-    batteryLevel,
+  return {
+    toSend: buffer.slice(0, FLUSH_BATCH_LIMIT),
+    remaining: buffer.slice(FLUSH_BATCH_LIMIT),
   };
-
-  // MQTT-first (kết nối persistent, không phải TLS handshake mỗi tick).
-  // Client là module-level singleton, sống trong cùng JS context với task
-  // headless này — connectMqtt được gọi ở startTracking activity-side, vẫn
-  // alive vì foreground service giữ JS engine. Fail → fallback HTTP.
-  const sentOverMqtt = await publishTelemetry(deviceId, payload);
-  if (sentOverMqtt) {
-    if (remaining.length === 0) {
-      await clearBuffer();
-    } else {
-      await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(remaining));
-    }
-    await setLastSent(latest.latitude, latest.longitude);
-    return true;
-  }
-
-  try {
-    const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.INGEST}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-device-id': deviceId,
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      if (res.status === 404) await clearBuffer();
-      return false;
-    }
-    if (remaining.length === 0) {
-      await clearBuffer();
-    } else {
-      await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(remaining));
-    }
-    await setLastSent(latest.latitude, latest.longitude);
-    return true;
-  } catch {
-    // Network fail — giữ nguyên buffer, lần fire kế tiếp retry.
-    return false;
-  }
 }
 
 /**
- * Heartbeat throttled — chỉ gửi nếu lần send trước (ingest hoặc heartbeat)
- * cách đây >= HEARTBEAT_MIN_INTERVAL_MS. Tránh spam server khi admin set
- * tick 5s + user đứng yên.
+ * Send telemetry — unified path cho cả ingest (có locations) và heartbeat
+ * (không locations). MQTT-first, HTTP fallback. `lastFixAt` luôn gửi nếu có
+ * → FE biết "GPS có hoạt động" chính xác kể cả khi mobile gate ingest.
+ *
+ * Heartbeat throttle: chỉ gửi heartbeat-only nếu lần send trước cách đây
+ * >= 30s (MOVING) hoặc >= 60s (STILL). Ingest (có locations) luôn gửi.
  */
-async function sendHeartbeat(deviceId: string, force: boolean): Promise<void> {
-  if (!force) {
+async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
+  const ingest = await prepareIngest(force);
+  const hasLocations = ingest !== null;
+
+  // Heartbeat-only path bị throttle để không spam khi tick admin = 5s.
+  if (!hasLocations && !force) {
     const last = await getLastSent();
-    // Khi STILL kéo dài throttle lên 60s — user không cử động nên không
-    // cần spam server. MOVING giữ default 30s để cha mẹ thấy cập nhật đều.
-    const throttle = isStill()
-      ? HEARTBEAT_STILL_MS
-      : HEARTBEAT_MIN_INTERVAL_MS;
+    const throttle = isStill() ? HEARTBEAT_STILL_MS : HEARTBEAT_MIN_INTERVAL_MS;
     if (last && Date.now() - last.t < throttle) return;
   }
 
   const batteryLevel = await readBatteryLevel();
   const cellTowers = await getCachedCells();
-  const payload = {
-    batteryLevel,
+  const payload: {
+    locations?: LocationData[];
+    cellTowers?: typeof cellTowers;
+    batteryLevel?: number;
+    lastFixAt?: number;
+  } = {
     cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
+    batteryLevel,
   };
+  if (hasLocations) payload.locations = ingest!.toSend;
+  if (lastFixTime != null) payload.lastFixAt = lastFixTime;
 
-  // MQTT-first, fallback HTTP (giống flushBufferIfMoved).
-  const bumpLastSentT = async () => {
-    // Heartbeat KHÔNG cập nhật lastSent position (vẫn ở vị trí cũ), chỉ bump
-    // timestamp để rate-limit heartbeat kế tiếp.
-    const last = await getLastSent();
-    const lat = last?.lat ?? 0;
-    const lon = last?.lon ?? 0;
-    await setLastSent(lat, lon);
-  };
+  // MQTT-first (kết nối persistent, không TLS handshake mỗi tick).
+  let success = await publishTelemetry(deviceId, payload);
 
-  const sentOverMqtt = await publishHeartbeat(deviceId, payload);
-  if (sentOverMqtt) {
-    await bumpLastSentT();
-    return;
+  // HTTP fallback nếu MQTT fail.
+  if (!success) {
+    try {
+      const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.INGEST}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': deviceId,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) success = true;
+      else if (res.status === 404 && hasLocations) await clearBuffer();
+    } catch {
+      // Network fail — buffer giữ nguyên, lần fire kế tiếp retry.
+    }
   }
 
-  try {
-    const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.HEARTBEAT}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-device-id': deviceId,
-      },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) await bumpLastSentT();
-  } catch {
-    // Network fail — lần fire tiếp theo sẽ thử lại.
+  if (!success) return;
+
+  if (hasLocations) {
+    const latest = ingest!.toSend[ingest!.toSend.length - 1];
+    if (ingest!.remaining.length === 0) {
+      await clearBuffer();
+    } else {
+      await AsyncStorage.setItem(
+        STORAGE_KEY_BUFFER,
+        JSON.stringify(ingest!.remaining),
+      );
+    }
+    await setLastSent(latest.latitude, latest.longitude);
+  } else {
+    // Heartbeat-only: bump lastSent.t để rate-limit heartbeat kế tiếp.
+    // KHÔNG đổi lastSent.lat/lon (vị trí thật vẫn ở fix gần nhất).
+    const last = await getLastSent();
+    await setLastSent(last?.lat ?? 0, last?.lon ?? 0);
   }
 }
 
@@ -496,29 +475,28 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   for (const loc of payload?.locations ?? []) {
     const acc = loc.coords.accuracy ?? null;
     if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) continue;
+    const ts = loc.timestamp ?? Date.now();
     fixes.push({
       latitude: loc.coords.latitude,
       longitude: loc.coords.longitude,
       accuracy: acc ?? undefined,
       quality: classifyQuality(acc),
-      timestamp: loc.timestamp ?? Date.now(),
+      timestamp: ts,
     });
+    // Track mọi fix hợp lệ (kể cả khi sẽ bị movement gate bỏ qua) — FE dùng
+    // để biết "GPS thực sự đang hoạt động" qua field lastFixAt trong payload.
+    if (lastFixTime == null || ts > lastFixTime) lastFixTime = ts;
   }
 
   if (fixes.length > 0) {
     await appendBuffer(fixes);
   }
 
-  // Poll command trước khi flush/heartbeat — request_location_now sẽ
-  // needFlush=true để force gửi ngay, bỏ qua throttle movement/heartbeat.
+  // Poll command — request_location_now trả force=true để bypass movement gate.
   const force = await pollAndExecuteCommands(deviceId);
 
-  // Thử flush ingest (nếu di chuyển hoặc force). Nếu không gửi → heartbeat
-  // (cũng throttled riêng để không spam ở tick 5s).
-  const sent = await flushBufferIfMoved(deviceId, force);
-  if (!sent) {
-    await sendHeartbeat(deviceId, force);
-  }
+  // Unified send: tự branch ingest vs heartbeat dựa trên buffer + movement gate.
+  await sendTelemetry(deviceId, force);
 });
 
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -596,6 +574,7 @@ export async function stopForegroundLocation(): Promise<void> {
   await clearBuffer();
   await AsyncStorage.removeItem(STORAGE_KEY_LAST_SENT);
   cellCache = null;
+  lastFixTime = null;
   unsubscribeAccelerometer();
 }
 

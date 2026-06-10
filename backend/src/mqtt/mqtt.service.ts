@@ -6,11 +6,9 @@ import {
 } from '@nestjs/common';
 import * as mqtt from 'mqtt';
 import { IngestService } from '../ingest/ingest.service';
-import type { HeartbeatDto } from '../ingest/dto/heartbeat.dto';
 import type { SubmitDataDto } from '../ingest/dto/submit-data.dto';
 
 const TELEMETRY_TOPIC = 'device/+/telemetry';
-const HEARTBEAT_TOPIC = 'device/+/heartbeat';
 
 /**
  * Subscribes to `device/{deviceId}/telemetry` on the MQTT broker and hands
@@ -36,17 +34,13 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
     this.client.on('connect', () => {
       this.logger.log(`Connected to MQTT broker ${brokerUrl}`);
-      this.client?.subscribe(
-        [TELEMETRY_TOPIC, HEARTBEAT_TOPIC],
-        { qos: 1 },
-        (err, granted) => {
-          if (err) this.logger.error(`Subscribe failed: ${err.message}`);
-          else
-            this.logger.log(
-              `Subscribed ${(granted ?? []).map((g) => g.topic).join(', ')}`,
-            );
-        },
-      );
+      this.client?.subscribe(TELEMETRY_TOPIC, { qos: 1 }, (err, granted) => {
+        if (err) this.logger.error(`Subscribe failed: ${err.message}`);
+        else
+          this.logger.log(
+            `Subscribed ${(granted ?? []).map((g) => g.topic).join(', ')}`,
+          );
+      });
     });
 
     this.client.on('reconnect', () =>
@@ -72,10 +66,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
     const parts = topic.split('/');
-    if (parts.length !== 3 || parts[0] !== 'device') return;
+    if (parts.length !== 3 || parts[0] !== 'device' || parts[2] !== 'telemetry')
+      return;
     const deviceId = parts[1];
-    const kind = parts[2];
-    if (kind !== 'telemetry' && kind !== 'heartbeat') return;
 
     let parsed: unknown;
     try {
@@ -88,14 +81,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      if (kind === 'telemetry') {
-        await this.ingestService.saveData(deviceId, parsed as SubmitDataDto);
-      } else {
-        await this.ingestService.heartbeat(deviceId, parsed as HeartbeatDto);
-      }
+      await this.ingestService.saveData(deviceId, parsed as SubmitDataDto);
     } catch (err) {
       this.logger.warn(
-        `${kind} failed for ${deviceId}: ${err instanceof Error ? err.message : String(err)}`,
+        `telemetry failed for ${deviceId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

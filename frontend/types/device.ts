@@ -160,6 +160,12 @@ export interface DeviceHeartbeatEvent {
   timestamp: string;
   cellTowers: CellTowerInfo[];
   connectedBts: ConnectedBts | null;
+  /**
+   * Epoch ms của fix GPS gần nhất mobile có. Null khi mobile chưa có fix
+   * (location off / airplane). FE dùng để đếm "GPS mất N phút" chính xác —
+   * không bị false positive khi user đứng yên + mobile gate ingest.
+   */
+  lastFixAt: number | null;
 }
 
 /** Socket.IO `device_moved` event payload (from backend EventsGateway). */
@@ -181,4 +187,6 @@ export interface DeviceMovedEvent {
   spoofingSuspected: boolean;
   /** Distance (m) between GPS fix and connected BTS. */
   gpsBtsDistanceM: number | null;
+  /** Epoch ms của fix GPS gần nhất mobile có (chính xác hơn `timestamp`). */
+  lastFixAt: number | null;
 }

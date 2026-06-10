@@ -20,14 +20,12 @@ import { useLocation } from '../hooks/useLocation';
 import type {
   CellTower,
   CommandDispatchEvent,
-  HeartbeatPayload,
   IngestPayload,
   LocationData,
 } from '../models/types';
 import {
   fetchParentContact,
   fetchTrackingInterval,
-  sendHeartbeat,
   sendIngestData,
 } from '../services/apiService';
 import { getCellTowerInfo } from '../services/cellInfoService';
@@ -39,7 +37,6 @@ import {
 import {
   connectMqtt,
   disconnectMqtt,
-  publishHeartbeat,
   publishTelemetry,
 } from '../services/mqttService';
 import {
@@ -145,42 +142,28 @@ export default function TrackingScreen() {
           // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
         }
 
-        // Watcher im lặng cả cửa sổ này (user đứng yên hoặc mất GPS). Bắn
-        // heartbeat thay vì resend fix cũ — server chỉ refresh last_seen.
-        // Kèm cellTowers (nếu có) để server thử cell-based positioning qua
-        // Combain khi mất GPS hoàn toàn; thành công sẽ ingest fix `network`,
-        // thất bại rơi về heartbeat thường.
-        if (batch.length === 0) {
-          let cellTowers: CellTower[] = [];
-          try {
-            cellTowers = await getCellTowerInfo();
-          } catch {
-            // cell sample fail — vẫn gửi heartbeat không cells
-          }
-          const hb: HeartbeatPayload = {
-            batteryLevel,
-            cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
-          };
-          const sentOverMqtt = await publishHeartbeat(storedData.deviceId, hb);
-          if (!sentOverMqtt) {
-            await sendHeartbeat(storedData.deviceId, hb);
-          }
-          return null;
+        // Unified payload — server tự branch dựa trên có/không có locations.
+        // `lastFixAt` luôn gửi nếu có fix → FE biết "GPS thực sự hoạt động"
+        // chính xác kể cả khi batch empty.
+        let cellTowers: CellTower[] = [];
+        try {
+          cellTowers = await getCellTowerInfo();
+        } catch {
+          // cell sample fail — gửi không cells, không critical
         }
-
-        const towers = await getCellTowerInfo();
         const payload: IngestPayload = {
-          locations: batch,
-          cellTowers: towers,
           batteryLevel,
+          cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
+          lastFixAt: lastKnownRef.current?.timestamp,
         };
+        if (batch.length > 0) payload.locations = batch;
 
         const sentOverMqtt = await publishTelemetry(storedData.deviceId, payload);
         if (!sentOverMqtt) {
           await sendIngestData(storedData.deviceId, payload);
         }
 
-        return batch[batch.length - 1];
+        return batch.length > 0 ? batch[batch.length - 1] : null;
       } catch {
         // network / GPS errors are non-fatal — the next tick will retry
         return null;

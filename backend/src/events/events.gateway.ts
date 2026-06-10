@@ -48,6 +48,12 @@ export interface DeviceMovedEvent {
   spoofingSuspected: boolean;
   /** Distance (m) between GPS fix and connected BTS, null when BTS unknown. */
   gpsBtsDistanceM: number | null;
+  /**
+   * Epoch ms của fix GPS gần nhất mobile có (kể cả không gửi vì gating
+   * movement). FE dùng làm dấu mốc "GPS thực sự đang hoạt động" — chính
+   * xác hơn `timestamp` (= server emit time, có thể trùng giữa các fix).
+   */
+  lastFixAt: number | null;
 }
 
 export interface CommandDispatchEvent {
@@ -153,6 +159,12 @@ export interface DeviceHeartbeatEvent {
     radio: string | null;
     range: number | null;
   } | null;
+  /**
+   * Epoch ms của fix GPS gần nhất mobile có. Null khi mobile chưa từng có
+   * fix hoặc location service bị tắt. FE dùng để đếm "GPS mất N phút" mà
+   * không bị false positive khi user đứng yên + mobile gating ingest.
+   */
+  lastFixAt: number | null;
 }
 
 /** Room name a device joins to receive its own commands. */

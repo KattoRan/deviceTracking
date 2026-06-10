@@ -79,34 +79,29 @@ export interface CellTower {
   isPrimary?: boolean;
 }
 
+/**
+ * Unified telemetry payload. Mobile gửi cùng endpoint cả khi có lẫn không
+ * có fix GPS mới.
+ *
+ *   - `locations` non-empty → server lưu location_history + emit device_moved.
+ *   - `locations` empty/omit → server chỉ refresh last_seen + emit device_heartbeat.
+ *
+ * `lastFixAt` ALWAYS gửi (epoch ms của fix GPS gần nhất từ OS, kể cả nếu fix
+ * đó không vào `locations` do bị movement gate) → FE biết chính xác "GPS có
+ * hoạt động không".
+ */
 export interface IngestPayload {
-  // Trajectory of fixes accumulated during one send window, ordered oldest
-  // → newest. Always at least one element — empty windows go through
-  // `sendHeartbeat` instead so the server doesn't pollute location_history
-  // with duplicate stationary fixes.
-  locations: LocationData[];
-  cellTowers: CellTower[];
+  locations?: LocationData[];
+  cellTowers?: CellTower[];
   /** Pin thiết bị (0-100), nếu lấy được. */
   batteryLevel?: number;
+  /** Epoch ms của fix GPS gần nhất mobile thấy (KHÔNG phải lần gửi cuối). */
+  lastFixAt?: number;
 }
 
 export interface IngestResponse {
   success: boolean;
   message?: string;
-}
-
-/**
- * Tín hiệu "còn sống" khi watcher không emit fix mới trong cửa sổ gửi.
- * Server chỉ refresh `last_seen` + `last_battery`, không insert
- * `location_history` → bảng lịch sử không phình ra theo từng tick đứng yên.
- *
- * Khi đính kèm `cellTowers` (mất GPS hoàn toàn), server thử cell-based
- * positioning (Combain) — thành công sẽ ingest như fix `network`-tier; thất
- * bại rơi về heartbeat thường.
- */
-export interface HeartbeatPayload {
-  batteryLevel?: number;
-  cellTowers?: CellTower[];
 }
 
 export interface CellTowerInfoRealtime extends CellTower {

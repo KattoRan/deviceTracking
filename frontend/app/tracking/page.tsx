@@ -126,10 +126,12 @@ function TrackingPageInner() {
       connectedBts: event.connectedBts,
       spoofingSuspected: event.spoofingSuspected,
       gpsBtsDistanceM: event.gpsBtsDistanceM,
-      // Marker chỉ dịch khi nhận device_moved → đây cũng là dấu mốc fix GPS
-      // gần nhất. FE so với now để hiện badge "GPS mất N phút" khi heartbeat
-      // bắt đầu chiếm sóng.
-      lastGpsAt: event.timestamp,
+      // `lastFixAt` từ server = mobile's lastFixTime (timestamp fix GPS gần
+      // nhất từ OS). Chính xác hơn `event.timestamp` khi mobile gate ingest
+      // — đứng yên + GPS hoạt động vẫn refresh được lastGpsAt.
+      lastGpsAt: event.lastFixAt
+        ? new Date(event.lastFixAt).toISOString()
+        : event.timestamp,
     };
     setDevices((prev) =>
       prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
@@ -138,11 +140,14 @@ function TrackingPageInner() {
       prev && prev.id === event.deviceId ? { ...prev, ...patch } : prev,
     );
   }, []);
-  // Heartbeat: device còn sống nhưng KHÔNG có fix GPS mới. Refresh
-  // last_seen + status + pin, cập nhật realtime cellTowers + connectedBts
-  // (cha mẹ vẫn thấy trạm đang nối thay đổi khi user di chuyển trong vùng
-  // mất GPS). KHÔNG đụng lat/lon/quality/lastGpsAt — marker ở fix GPS cuối,
-  // chênh lệch (now - lastGpsAt) chính là thời gian mất GPS.
+  // Heartbeat: device còn sống nhưng KHÔNG có fix GPS mới gửi lên (có thể
+  // do mobile gate ingest vì stationary, hoặc thực sự mất GPS). Refresh
+  // last_seen + status + pin + cellTowers/connectedBts realtime, KHÔNG đụng
+  // lat/lon — marker giữ ở fix GPS cuối.
+  //
+  // `lastGpsAt` bump từ `event.lastFixAt` (mobile source of truth: timestamp
+  // fix GPS gần nhất từ OS, kể cả fix bị gate). Null khi mobile chưa có fix
+  // hoặc location off → lastGpsAt stay → badge "GPS mất" fire đúng.
   const handleDeviceHeartbeat = useCallback((event: DeviceHeartbeatEvent) => {
     const patch: Partial<Device> = {
       last_seen: event.timestamp,
@@ -151,6 +156,9 @@ function TrackingPageInner() {
       connectedBts: event.connectedBts,
     };
     if (event.batteryLevel != null) patch.last_battery = event.batteryLevel;
+    if (event.lastFixAt) {
+      patch.lastGpsAt = new Date(event.lastFixAt).toISOString();
+    }
     setDevices((prev) =>
       prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
     );
