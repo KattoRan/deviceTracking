@@ -7,6 +7,7 @@ import { Vibration } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
+import { publishHeartbeat, publishTelemetry } from './mqttService';
 
 export const FOREGROUND_LOCATION_TASK = 'foreground-location-task';
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
@@ -42,6 +43,12 @@ const ACCEL_SAMPLE_INTERVAL_MS = 1000;
 const STILL_VARIANCE_THRESHOLD = 0.15;
 const HEARTBEAT_STILL_MS = 60_000;
 const MOVEMENT_STILL_THRESHOLD_M = 10;
+
+// Buffer tồn tại trong AsyncStorage qua mọi lần restart. Drop fix quá cũ
+// trước khi flush — fix offline > 30 phút không còn ý nghĩa realtime, đẩy
+// về server chỉ làm rác history (vd sau khi admin reset data + user mở app
+// lại từ session cũ).
+const BUFFER_MAX_AGE_MS = 30 * 60 * 1000;
 
 function classifyQuality(accuracy: number | null | undefined): LocationQuality {
   if (accuracy == null) return 'network';
@@ -197,7 +204,19 @@ async function flushBufferIfMoved(
 ): Promise<boolean> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
   if (!raw) return false;
-  const buffer: LocationData[] = JSON.parse(raw);
+  let buffer: LocationData[] = JSON.parse(raw);
+  // Drop fix quá cũ — tránh push rác lên server khi user mở app lại từ
+  // session cũ hoặc sau khi admin reset data.
+  const cutoff = Date.now() - BUFFER_MAX_AGE_MS;
+  const filtered = buffer.filter((f) => f.timestamp >= cutoff);
+  if (filtered.length !== buffer.length) {
+    if (filtered.length === 0) {
+      await clearBuffer();
+    } else {
+      await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(filtered));
+    }
+    buffer = filtered;
+  }
   if (buffer.length === 0) return false;
 
   const latest = buffer[buffer.length - 1];
@@ -225,6 +244,26 @@ async function flushBufferIfMoved(
   const remaining = buffer.slice(toSend.length);
   const batteryLevel = await readBatteryLevel();
   const cellTowers = await getCachedCells();
+  const payload = {
+    locations: toSend,
+    cellTowers,
+    batteryLevel,
+  };
+
+  // MQTT-first (kết nối persistent, không phải TLS handshake mỗi tick).
+  // Client là module-level singleton, sống trong cùng JS context với task
+  // headless này — connectMqtt được gọi ở startTracking activity-side, vẫn
+  // alive vì foreground service giữ JS engine. Fail → fallback HTTP.
+  const sentOverMqtt = await publishTelemetry(deviceId, payload);
+  if (sentOverMqtt) {
+    if (remaining.length === 0) {
+      await clearBuffer();
+    } else {
+      await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(remaining));
+    }
+    await setLastSent(latest.latitude, latest.longitude);
+    return true;
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.INGEST}`, {
@@ -233,11 +272,7 @@ async function flushBufferIfMoved(
         'Content-Type': 'application/json',
         'x-device-id': deviceId,
       },
-      body: JSON.stringify({
-        locations: toSend,
-        cellTowers,
-        batteryLevel,
-      }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       if (res.status === 404) await clearBuffer();
@@ -274,6 +309,26 @@ async function sendHeartbeat(deviceId: string, force: boolean): Promise<void> {
 
   const batteryLevel = await readBatteryLevel();
   const cellTowers = await getCachedCells();
+  const payload = {
+    batteryLevel,
+    cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
+  };
+
+  // MQTT-first, fallback HTTP (giống flushBufferIfMoved).
+  const bumpLastSentT = async () => {
+    // Heartbeat KHÔNG cập nhật lastSent position (vẫn ở vị trí cũ), chỉ bump
+    // timestamp để rate-limit heartbeat kế tiếp.
+    const last = await getLastSent();
+    const lat = last?.lat ?? 0;
+    const lon = last?.lon ?? 0;
+    await setLastSent(lat, lon);
+  };
+
+  const sentOverMqtt = await publishHeartbeat(deviceId, payload);
+  if (sentOverMqtt) {
+    await bumpLastSentT();
+    return;
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.HEARTBEAT}`, {
@@ -282,19 +337,9 @@ async function sendHeartbeat(deviceId: string, force: boolean): Promise<void> {
         'Content-Type': 'application/json',
         'x-device-id': deviceId,
       },
-      body: JSON.stringify({
-        batteryLevel,
-        cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
-      }),
+      body: JSON.stringify(payload),
     });
-    if (res.ok) {
-      // Heartbeat KHÔNG cập nhật lastSent position (vẫn ở vị trí cũ), chỉ
-      // bump timestamp để rate-limit heartbeat kế tiếp. Re-read và write.
-      const last = await getLastSent();
-      const lat = last?.lat ?? 0;
-      const lon = last?.lon ?? 0;
-      await setLastSent(lat, lon);
-    }
+    if (res.ok) await bumpLastSentT();
   } catch {
     // Network fail — lần fire tiếp theo sẽ thử lại.
   }
