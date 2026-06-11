@@ -489,25 +489,32 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (!deviceId) return;
 
   const payload = data as TaskData | undefined;
-  const fixes: LocationData[] = [];
-  for (const loc of payload?.locations ?? []) {
+  const allLocs = payload?.locations ?? [];
+
+  // Cập nhật lastFixTime từ tất cả fix hợp lệ — FE dùng để đếm "GPS mất N phút".
+  for (const loc of allLocs) {
     const acc = loc.coords.accuracy ?? null;
     if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) continue;
     const ts = loc.timestamp ?? Date.now();
-    fixes.push({
-      latitude: loc.coords.latitude,
-      longitude: loc.coords.longitude,
-      accuracy: acc ?? undefined,
-      quality: classifyQuality(acc),
-      timestamp: ts,
-    });
-    // Track mọi fix hợp lệ (kể cả khi sẽ bị movement gate bỏ qua) — FE dùng
-    // để biết "GPS thực sự đang hoạt động" qua field lastFixAt trong payload.
     if (lastFixTime == null || ts > lastFixTime) lastFixTime = ts;
   }
 
-  if (fixes.length > 0) {
-    await appendBuffer(fixes);
+  // Chỉ append fix MỚI NHẤT vào buffer — distanceInterval=0 khiến OS batch
+  // tất cả fix tích lũy từ lần task trước vào payload.locations (có thể 10-30
+  // fix/lần). Foreground watcher đã bắt các fix cũ hơn rồi; lấy hết sẽ tạo
+  // hàng nghìn row/giờ dù thiết bị đứng yên.
+  const latestLoc = allLocs[allLocs.length - 1];
+  if (latestLoc) {
+    const acc = latestLoc.coords.accuracy ?? null;
+    if (acc == null || acc <= MAX_ACCEPTABLE_ACCURACY_M) {
+      await appendBuffer([{
+        latitude: latestLoc.coords.latitude,
+        longitude: latestLoc.coords.longitude,
+        accuracy: acc ?? undefined,
+        quality: classifyQuality(acc),
+        timestamp: latestLoc.timestamp ?? Date.now(),
+      }]);
+    }
   }
 
   // Poll command — request_location_now trả force=true để bypass movement gate.
