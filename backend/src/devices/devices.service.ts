@@ -153,13 +153,12 @@ export class DevicesService {
         device_id: string;
         latitude: string;
         longitude: string;
-        district: string | null;
         recorded_at: Date;
       }>
     >`
       SELECT DISTINCT ON (device_id)
         device_id, latitude::text AS latitude, longitude::text AS longitude,
-        district, recorded_at
+        recorded_at
       FROM location_history
       WHERE device_id = ANY(${deviceIds})
       ORDER BY device_id, recorded_at DESC;
@@ -192,7 +191,6 @@ export class DevicesService {
         type: d.type,
         latitude: loc ? Number(loc.latitude) : null,
         longitude: loc ? Number(loc.longitude) : null,
-        district: loc?.district ?? null,
         bts_id: btsMap.get(d.id) ?? null,
         last_seen: d.last_seen ?? loc?.recorded_at ?? null,
         last_battery: d.last_battery,
@@ -240,7 +238,6 @@ export class DevicesService {
         longitude: string;
         accuracy_m: number | null;
         quality: string | null;
-        district: string | null;
         recorded_at: Date;
       }>
     >`
@@ -248,7 +245,6 @@ export class DevicesService {
              longitude::text AS longitude,
              accuracy_m,
              quality,
-             district,
              recorded_at
       FROM location_history
       WHERE device_id = ${deviceId}
@@ -264,7 +260,6 @@ export class DevicesService {
       lon: number;
       accuracy: number | null;
       quality: string | null;
-      district: string | null;
       time: Date;
     }> = [];
     let distanceTotal = 0;
@@ -284,7 +279,6 @@ export class DevicesService {
         lon,
         accuracy: row.accuracy_m,
         quality: row.quality,
-        district: row.district,
         time: row.recorded_at,
       });
       prevLat = lat;
@@ -348,12 +342,11 @@ export class DevicesService {
       Array<{
         latitude: string;
         longitude: string;
-        district: string | null;
         recorded_at: Date;
       }>
     >`
       SELECT latitude::text AS latitude, longitude::text AS longitude,
-             district, recorded_at
+             recorded_at
       FROM location_history
       WHERE device_id = ${id}
       ORDER BY recorded_at DESC
@@ -426,7 +419,6 @@ export class DevicesService {
         ? {
             latitude: Number(location.latitude),
             longitude: Number(location.longitude),
-            district: location.district,
             recorded_at: location.recorded_at,
           }
         : null,

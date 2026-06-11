@@ -113,7 +113,6 @@ model location_history {
 
   geom Unsupported("geometry(Point,4326)")?
 
-  district    String?
   recorded_at DateTime
 
   device devices @relation(fields: [device_id], references: [id], onDelete: Cascade)

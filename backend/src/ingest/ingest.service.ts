@@ -4,7 +4,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import axios from 'axios';
 import { AlertsService } from '../alerts/alerts.service';
 import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -449,15 +448,6 @@ export class IngestService {
     parentAccountId: string,
   ): Promise<void> {
     try {
-      const latest = locations[locations.length - 1];
-      // Reverse-geocode only the latest fix — running it for every point in
-      // a batch would burn the LocationIQ quota and almost never produce a
-      // different district within a ≤60s window.
-      const addressPromise = this.reverseGeocode(
-        latest.latitude,
-        latest.longitude,
-      );
-
       // Pre-check battery state to know whether we need to flip alert flags
       // alongside updating last_seen. Hysteresis: arm alert at <20%, disarm
       // at ≥25% so a device hovering around 20% doesn't ping repeatedly.
@@ -562,13 +552,6 @@ export class IngestService {
         );
       }
 
-      const address = await addressPromise;
-      if (address) {
-        await this.prisma.location_history.updateMany({
-          where: { device_id: deviceId, recorded_at: latestAt },
-          data: { district: address },
-        });
-      }
     } catch (err) {
       this.logger.error(
         `persistInBackground failed for ${deviceId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -592,26 +575,5 @@ export class IngestService {
           `BTS lookup failed for ${cell.mcc}-${cell.mnc}-${cell.lac}-${cell.cid}: ${err instanceof Error ? err.message : String(err)}`,
         ),
       );
-  }
-
-  private async reverseGeocode(lat: number, lon: number): Promise<string> {
-    const key = process.env.LOCATIONIQ_KEY;
-    if (!key) return '';
-    try {
-      const res = await axios.get<{ display_name?: string }>(
-        'https://us1.locationiq.com/v1/reverse',
-        {
-          params: { key, lat, lon, format: 'json' },
-          timeout: 8000,
-          headers: { 'User-Agent': 'deviceTracking/1.0' },
-        },
-      );
-      return res.data?.display_name ?? '';
-    } catch (err) {
-      this.logger.warn(
-        `LocationIQ error ${lat},${lon}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return '';
-    }
   }
 }

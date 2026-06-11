@@ -513,7 +513,6 @@ function DetailDrawer({
                   value={`${formatCoord(detail.location.latitude)}, ${formatCoord(detail.location.longitude)}`}
                   mono
                 />
-                <DetailRow label="Khu vực" value={detail.location.district} />
                 <DetailRow
                   label="Thời điểm"
                   value={formatDateTime(detail.location.recorded_at)}

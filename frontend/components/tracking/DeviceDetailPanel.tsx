@@ -132,10 +132,10 @@ export default function DeviceDetailPanel({
     const t = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(t);
   }, []);
-  // Coi là "mất GPS" khi fix GPS cuối > 60s và device vẫn online (nghĩa là
-  // heartbeat vẫn về). Threshold 60s vì tick mobile default 30s, cho phép
-  // trễ 1 tick mạng chậm.
-  const GPS_LOST_THRESHOLD_MS = 60_000;
+  // Coi là "mất GPS" khi fix GPS cuối > 90s và device vẫn online. Threshold
+  // 90s = 3× heartbeat interval (30s) để tránh false positive: lastFixAt đầu
+  // tiên đến từ socket có thể đã ~60s tuổi nếu page vừa load giữa chu kỳ.
+  const GPS_LOST_THRESHOLD_MS = 90_000;
   const gpsLostMs =
     isOnline && device.lastGpsAt
       ? Math.max(0, now - new Date(device.lastGpsAt).getTime())

@@ -860,9 +860,6 @@ function DevicePopupContent({ device }: { device: Device }) {
           {device.accuracy != null ? ` · ±${Math.round(device.accuracy)}m` : ""}
         </div>
       )}
-      {device.district && (
-        <div style={{ fontSize: 11, color: "#64748b" }}>{device.district}</div>
-      )}
     </div>
   );
 }

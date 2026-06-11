@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Lock,
-  MapPin,
   Search,
   Smartphone,
   X,
@@ -62,8 +61,7 @@ export default function DeviceSidebar({
       return (
         d.name.toLowerCase().includes(q) ||
         (d.phone_number?.toLowerCase().includes(q) ?? false) ||
-        (d.model?.toLowerCase().includes(q) ?? false) ||
-        (d.district?.toLowerCase().includes(q) ?? false)
+        (d.model?.toLowerCase().includes(q) ?? false)
       );
     });
   }, [devices, search, status]);
@@ -281,12 +279,6 @@ function DeviceItem({
             {device.model || "--"}
             {device.device_os ? ` · ${device.device_os}` : ""}
           </p>
-          {device.district && (
-            <p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500">
-              <MapPin className="h-3 w-3 flex-shrink-0" />
-              {device.district}
-            </p>
-          )}
           {device.last_seen && (
             <p className="mt-1 text-[10px] text-slate-400">
               {formatLastSeen(device.last_seen)}

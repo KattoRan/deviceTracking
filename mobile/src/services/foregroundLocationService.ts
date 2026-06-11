@@ -519,9 +519,8 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
 
 /**
  * Bật foreground service tracking.
- * - distanceInterval=25m: OS chỉ deliver fix khi thiết bị thực sự di chuyển,
- *   tiết kiệm pin so với distanceInterval=0.
- * - timeInterval=30s: fallback wake để heartbeat vẫn chạy khi đứng yên.
+ * - distanceInterval=0: bắt buộc để OS fire theo timeInterval kể cả khi đứng yên.
+ * - timeInterval=30s: heartbeat + flush đều đặn. Filter 25m áp ở movement gate.
  * Cần permission `ACCESS_FINE_LOCATION`. KHÔNG cần `ACCESS_BACKGROUND_LOCATION`
  * vì khởi tạo từ activity foreground + có foregroundService config (Android 12+).
  */

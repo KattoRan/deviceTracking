@@ -29,7 +29,6 @@ export interface Device {
   type: string | null;
   latitude: number | null;
   longitude: number | null;
-  district: string | null;
   bts_id: number | null;
   last_seen: string | null;
   last_battery: number | null;
@@ -79,7 +78,6 @@ export interface DeviceDetail {
   location: {
     latitude: number;
     longitude: number;
-    district: string | null;
     recorded_at: string;
   } | null;
   cell: {
@@ -120,7 +118,6 @@ export interface HistoryPoint {
   accuracy: number | null;
   /** Tier assigned on ingest. NULL = rows persisted before the column existed. */
   quality: LocationQuality | null;
-  district: string | null;
   time: string;
 }
 

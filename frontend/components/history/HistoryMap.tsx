@@ -145,7 +145,6 @@ export default function HistoryMap({
           properties: {
             idx,
             time: p.time,
-            district: p.district,
             quality: p.quality,
             accuracy: p.accuracy,
             color: isPassed ? palette.passed : palette.pending,
@@ -220,7 +219,6 @@ export default function HistoryMap({
       const p = hit.properties as {
         idx: number;
         time: string;
-        district: string | null;
         quality: LocationQuality | null;
         accuracy: number | null;
       };
@@ -232,7 +230,6 @@ export default function HistoryMap({
           lon,
           accuracy: p.accuracy,
           quality: p.quality,
-          district: p.district,
           time: p.time,
         },
       });
@@ -426,7 +423,7 @@ export default function HistoryMap({
             <br />
             {new Date(start.time).toLocaleString("vi-VN")}
             <br />
-            {start.district || `${start.lat.toFixed(5)}, ${start.lon.toFixed(5)}`}
+            {`${start.lat.toFixed(5)}, ${start.lon.toFixed(5)}`}
           </div>
         </Popup>
       )}
@@ -445,7 +442,7 @@ export default function HistoryMap({
             <br />
             {new Date(end.time).toLocaleString("vi-VN")}
             <br />
-            {end.district || `${end.lat.toFixed(5)}, ${end.lon.toFixed(5)}`}
+            {`${end.lat.toFixed(5)}, ${end.lon.toFixed(5)}`}
           </div>
         </Popup>
       )}
@@ -464,8 +461,7 @@ export default function HistoryMap({
             <br />
             {new Date(currentPoint.time).toLocaleString("vi-VN")}
             <br />
-            {currentPoint.district ||
-              `${currentPoint.lat.toFixed(5)}, ${currentPoint.lon.toFixed(5)}`}
+            {`${currentPoint.lat.toFixed(5)}, ${currentPoint.lon.toFixed(5)}`}
             <br />
             <span className="text-slate-500">
               {qualityLabel(currentPoint.quality)}
@@ -490,8 +486,7 @@ export default function HistoryMap({
             #{waypointPopup.index + 1} —{" "}
             {new Date(waypointPopup.point.time).toLocaleTimeString("vi-VN")}
             <br />
-            {waypointPopup.point.district ||
-              `${waypointPopup.point.lat.toFixed(5)}, ${waypointPopup.point.lon.toFixed(5)}`}
+            {`${waypointPopup.point.lat.toFixed(5)}, ${waypointPopup.point.lon.toFixed(5)}`}
             <br />
             <span className="text-slate-500">
               {qualityLabel(waypointPopup.point.quality)}
