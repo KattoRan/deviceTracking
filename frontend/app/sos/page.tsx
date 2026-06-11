@@ -185,9 +185,6 @@ export default function SosHistoryPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-2xl">
-                        {e.personType === "CHILD" ? "👶" : "👴"}
-                      </span>
                       <p className="truncate text-base font-semibold text-slate-900">
                         {e.personName}
                       </p>

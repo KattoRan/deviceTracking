@@ -486,10 +486,6 @@ function DetailDrawer({
 
             <DetailSection icon={User} title="Người được giám sát">
               <DetailRow label="Tên" value={detail.person_name} />
-              <DetailRow
-                label="Loại"
-                value={detail.person_type === "CHILD" ? "Trẻ em" : "Người già"}
-              />
               {detail.last_battery != null && (
                 <DetailRow
                   label="Pin"

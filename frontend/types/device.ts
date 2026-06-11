@@ -18,14 +18,11 @@ export interface ConnectedBts {
   range: number | null;
 }
 
-export type PersonType = "CHILD" | "ELDERLY";
-
 /** Row in GET /api/v1/devices. */
 export interface Device {
   id: string;
   name: string;
   person_name: string;
-  person_type: PersonType;
   phone_number: string | null;
   model: string | null;
   device_os: string | null;
@@ -63,7 +60,6 @@ export interface Device {
 export interface DeviceDetail {
   id: string;
   person_name: string;
-  person_type: PersonType;
   phone_number: string | null;
   model: string | null;
   device_os: string | null;
@@ -133,7 +129,6 @@ export interface LocationHistory {
     id: string;
     name: string;
     person_name: string;
-    person_type: PersonType;
     phone_number: string | null;
   };
   from: string;

@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -9,11 +8,6 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-
-export enum PersonTypeDto {
-  CHILD = 'CHILD',
-  ELDERLY = 'ELDERLY',
-}
 
 export class DeviceInfoDto {
   @ApiPropertyOptional({ example: 'Pixel 7' })
@@ -33,20 +27,16 @@ export class DeviceInfoDto {
 }
 
 export class PairDeviceDto {
-  @ApiProperty({ example: 'K7M-9X2', description: 'Pairing code phụ huynh cung cấp' })
+  @ApiProperty({ example: 'K7M-9X2', description: 'Pairing code người quản lý cung cấp' })
   @IsString()
   @IsNotEmpty({ message: 'Pairing code không được để trống' })
   pairingCode: string;
 
-  @ApiProperty({ example: 'Bé Minh', minLength: 1 })
+  @ApiProperty({ example: 'Nguyễn Văn A', minLength: 1 })
   @IsString()
   @IsNotEmpty({ message: 'Tên người được giám sát không được để trống' })
   @MinLength(1)
   personName: string;
-
-  @ApiProperty({ enum: PersonTypeDto, example: PersonTypeDto.CHILD })
-  @IsEnum(PersonTypeDto, { message: 'personType phải là CHILD hoặc ELDERLY' })
-  personType: PersonTypeDto;
 
   @ApiPropertyOptional({ example: '0987654321' })
   @IsOptional()
@@ -66,9 +56,6 @@ export class PairDeviceResponseDto {
   @ApiProperty({ format: 'uuid' })
   deviceId: string;
 
-  @ApiProperty({ example: 'Bé Minh' })
+  @ApiProperty({ example: 'Nguyễn Văn A' })
   personName: string;
-
-  @ApiProperty({ enum: PersonTypeDto })
-  personType: PersonTypeDto;
 }

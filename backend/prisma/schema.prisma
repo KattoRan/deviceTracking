@@ -8,11 +8,6 @@ datasource db {
   extensions = [postgis]
 }
 
-enum PersonType {
-  CHILD
-  ELDERLY
-}
-
 model parent_accounts {
   id            String   @id @default(uuid())
   email         String   @unique
@@ -32,7 +27,6 @@ model devices {
   id                String     @id @default(uuid())
   parent_account_id String
   person_name       String
-  person_type       PersonType
   phone_number      String?
   model             String?
   type              String?

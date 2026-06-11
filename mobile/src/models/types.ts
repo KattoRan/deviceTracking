@@ -1,9 +1,6 @@
-export type PersonType = 'CHILD' | 'ELDERLY';
-
 export interface PairDeviceRequest {
   pairingCode: string;
   personName: string;
-  personType: PersonType;
   phoneNumber?: string;
   device?: {
     model?: string;
@@ -15,13 +12,11 @@ export interface PairDeviceRequest {
 export interface PairDeviceResponse {
   deviceId: string;
   personName: string;
-  personType: PersonType;
 }
 
 export interface StoredDeviceData {
   deviceId: string;
   personName: string;
-  personType: PersonType;
   pairedAt: string;
 }
 

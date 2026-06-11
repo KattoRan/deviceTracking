@@ -24,7 +24,7 @@ import type {
   LocationData,
 } from '../models/types';
 import {
-  fetchParentContact,
+  fetchAdminContact,
   fetchTrackingInterval,
   sendIngestData,
 } from '../services/apiService';
@@ -46,7 +46,7 @@ import {
   sendCommandResult,
 } from '../services/socketService';
 
-interface ParentContact {
+interface AdminContact {
   displayName: string | null;
   phoneNumber: string | null;
 }
@@ -69,7 +69,7 @@ export default function TrackingScreen() {
   // useLocation hook vẫn watch để cấp `location` cho UI (SosButton lastKnown).
   const [serviceActive, setServiceActive] = useState(false);
   const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_TRACKING_INTERVAL_MS);
-  const [parentContact, setParentContact] = useState<ParentContact | null>(null);
+  const [adminContact, setAdminContact] = useState<AdminContact | null>(null);
   const [contactLoading, setContactLoading] = useState(true);
   const [sosResult, setSosResult] = useState<{
     state: 'success' | 'error';
@@ -284,19 +284,19 @@ export default function TrackingScreen() {
     });
   }, []);
 
-  // Fetch parent contact info once we have a deviceId. Showing parent name
+  // Fetch admin contact info once we have a deviceId. Showing admin name
   // and phone on this screen so the monitored person can always call back
-  // is the whole reason the field exists in parent_accounts.
+  // is the whole reason the field exists in admin_accounts.
   useEffect(() => {
     if (!storedData?.deviceId) return;
     let cancelled = false;
     setContactLoading(true);
-    fetchParentContact(storedData.deviceId)
+    fetchAdminContact(storedData.deviceId)
       .then((info) => {
-        if (!cancelled) setParentContact(info);
+        if (!cancelled) setAdminContact(info);
       })
       .catch(() => {
-        if (!cancelled) setParentContact(null);
+        if (!cancelled) setAdminContact(null);
       })
       .finally(() => {
         if (!cancelled) setContactLoading(false);
@@ -306,7 +306,7 @@ export default function TrackingScreen() {
     };
   }, [storedData?.deviceId]);
 
-  // Re-fetch khi app trở lại foreground để phụ huynh đổi sđt trên web là
+  // Re-fetch khi app trở lại foreground để người quản lý đổi sđt trên web là
   // mobile thấy lần sau mở app. Dùng prev-state riêng — không share
   // `appStateRef` với listener telemetry để tránh race khi cả 2 listener
   // cùng fire trên 1 event (thứ tự không đảm bảo).
@@ -318,8 +318,8 @@ export default function TrackingScreen() {
       const prev = prevState;
       prevState = next;
       if (prev.match(/inactive|background/) && next === 'active') {
-        fetchParentContact(deviceId)
-          .then((info) => setParentContact(info))
+        fetchAdminContact(deviceId)
+          .then((info) => setAdminContact(info))
           .catch(() => undefined);
       }
     });
@@ -413,13 +413,13 @@ export default function TrackingScreen() {
     };
   }, []);
 
-  const handleCallParent = useCallback(() => {
-    if (!parentContact?.phoneNumber) return;
-    const tel = parentContact.phoneNumber.replace(/\s+/g, '');
+  const handleCallAdmin = useCallback(() => {
+    if (!adminContact?.phoneNumber) return;
+    const tel = adminContact.phoneNumber.replace(/\s+/g, '');
     Linking.openURL(`tel:${tel}`).catch(() => {
       Alert.alert('Không gọi được', 'Thiết bị không hỗ trợ cuộc gọi.');
     });
-  }, [parentContact?.phoneNumber]);
+  }, [adminContact?.phoneNumber]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -434,24 +434,24 @@ export default function TrackingScreen() {
           ) : (
             <>
               <ContactRow
-                label="Phụ huynh"
-                value={parentContact?.displayName || 'Chưa đặt tên'}
+                label="Người quản lý"
+                value={adminContact?.displayName || 'Chưa đặt tên'}
               />
               <ContactRow
                 label="Số điện thoại"
-                value={parentContact?.phoneNumber || 'Chưa có số'}
+                value={adminContact?.phoneNumber || 'Chưa có số'}
               />
-              {parentContact?.phoneNumber ? (
+              {adminContact?.phoneNumber ? (
                 <TouchableOpacity
                   style={styles.callBtn}
-                  onPress={handleCallParent}
+                  onPress={handleCallAdmin}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.callBtnText}>Gọi phụ huynh</Text>
+                  <Text style={styles.callBtnText}>Gọi người quản lý</Text>
                 </TouchableOpacity>
               ) : (
                 <Text style={styles.placeholder}>
-                  Nhờ phụ huynh cập nhật số điện thoại tại trang tài khoản.
+                  Nhờ người quản lý cập nhật số điện thoại tại trang tài khoản.
                 </Text>
               )}
             </>

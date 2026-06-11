@@ -1,11 +1,9 @@
 import { apiClient } from "@/lib/api";
-import type { PersonType } from "@/types/device";
 
 export interface SosEvent {
   id: string;
   deviceId: string;
   personName: string;
-  personType: PersonType;
   lat: number;
   lon: number;
   accuracy: number | null;

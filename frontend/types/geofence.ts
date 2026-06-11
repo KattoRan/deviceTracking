@@ -14,7 +14,6 @@ export interface GeofenceDetail extends GeofenceListItem {
     id: string;
     name: string;
     person_name: string;
-    person_type: "CHILD" | "ELDERLY";
     phone_number: string | null;
   }>;
 }

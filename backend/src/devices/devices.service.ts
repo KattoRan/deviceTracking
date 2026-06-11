@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma, PersonType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { EventsGateway, type GeofenceBreachEvent } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,7 +13,6 @@ import { normalizePairingCode } from '../auth/pairing-code.util';
 import {
   PairDeviceDto,
   PairDeviceResponseDto,
-  PersonTypeDto,
 } from './dto/pair-device.dto';
 import type { HistoryQualityMode } from './dto/history-query.dto';
 
@@ -123,22 +122,20 @@ export class DevicesService {
       data: {
         parent_account_id: parent.id,
         person_name: dto.personName.trim(),
-        person_type: dto.personType as PersonType,
         phone_number: dto.phoneNumber?.trim() || null,
         model: dto.device?.model?.trim() || null,
         type: dto.device?.type?.trim() || null,
         device_os: dto.device?.os?.trim() || null,
       },
-      select: { id: true, person_name: true, person_type: true },
+      select: { id: true, person_name: true },
     });
 
     this.logger.log(
-      `Paired device=${device.id} (${device.person_type}) to parent=${parent.id}`,
+      `Paired device=${device.id} (${device.person_name}) to parent=${parent.id}`,
     );
     return {
       deviceId: device.id,
       personName: device.person_name,
-      personType: device.person_type as PersonTypeDto,
     };
   }
 
@@ -189,7 +186,6 @@ export class DevicesService {
         id: d.id,
         name: d.person_name,
         person_name: d.person_name,
-        person_type: d.person_type,
         phone_number: d.phone_number,
         model: d.model,
         device_os: d.device_os,
@@ -308,7 +304,6 @@ export class DevicesService {
         id: device.id,
         name: device.person_name,
         person_name: device.person_name,
-        person_type: device.person_type,
         phone_number: device.phone_number,
       },
       from: fromDate.toISOString(),
@@ -412,7 +407,6 @@ export class DevicesService {
     return {
       id: device.id,
       person_name: device.person_name,
-      person_type: device.person_type,
       phone_number: device.phone_number,
       model: device.model,
       device_os: device.device_os,

@@ -402,15 +402,6 @@ export default function DeviceDetailPanel({
                 value={detail?.person_name || device.person_name || "--"}
               />
               <Row
-                icon={User}
-                label="Loại"
-                value={
-                  (detail?.person_type ?? device.person_type) === "CHILD"
-                    ? "👶 Trẻ em"
-                    : "👴 Người già"
-                }
-              />
-              <Row
                 icon={Phone}
                 label="Số điện thoại"
                 value={detail?.phone_number || device.phone_number || "--"}

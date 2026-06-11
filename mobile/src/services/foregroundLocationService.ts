@@ -37,7 +37,9 @@ const CELL_CACHE_TTL_MS = 15_000;
 // - Walking/lái xe: oscillates 8-12, variance > 0.3.
 // - Buffer 30 mẫu cuối (30s). Threshold variance đủ tách 2 trạng thái rõ.
 // - Khi STILL: tăng heartbeat throttle lên 60s + tăng movement threshold lên
-//   10m (lọc GPS jitter). Khi MOVING: dùng default 30s + 5m.
+//   10m. Khi MOVING: dùng default 30s + 5m.
+// - Movement gate dùng accuracy-adjusted distance: rawDistance - max(acc_new, acc_old)
+//   > threshold. Tránh GPS jitter (±20m) trigger ingest giả khi thiết bị đứng yên.
 const ACCEL_BUFFER_SIZE = 30;
 const ACCEL_SAMPLE_INTERVAL_MS = 1000;
 const STILL_VARIANCE_THRESHOLD = 0.15;
@@ -149,6 +151,7 @@ interface LastSent {
   lat: number;
   lon: number;
   t: number; // epoch ms
+  acc?: number; // GPS accuracy (m) của fix đã gửi — dùng cho movement gate
 }
 
 async function getLastSent(): Promise<LastSent | null> {
@@ -161,8 +164,8 @@ async function getLastSent(): Promise<LastSent | null> {
   }
 }
 
-async function setLastSent(lat: number, lon: number): Promise<void> {
-  const payload: LastSent = { lat, lon, t: Date.now() };
+async function setLastSent(lat: number, lon: number, acc?: number): Promise<void> {
+  const payload: LastSent = { lat, lon, t: Date.now(), acc };
   await AsyncStorage.setItem(STORAGE_KEY_LAST_SENT, JSON.stringify(payload));
 }
 
@@ -233,14 +236,29 @@ async function prepareIngest(
   const latest = buffer[buffer.length - 1];
   if (!force) {
     const last = await getLastSent();
-    // STILL → threshold 10m (lọc GPS jitter). MOVING → 5m default.
     const threshold = isStill() ? MOVEMENT_STILL_THRESHOLD_M : MOVEMENT_THRESHOLD_M;
-    if (
-      last &&
-      haversineMeters(latest.latitude, latest.longitude, last.lat, last.lon) <
-        threshold
-    ) {
-      return null;
+    if (last) {
+      const rawDistance = haversineMeters(
+        latest.latitude,
+        latest.longitude,
+        last.lat,
+        last.lon,
+      );
+      // Trừ sai số GPS của 2 điểm trước khi so threshold. Dùng max (không sum)
+      // để tránh threshold thổi phồng quá lớn — sum cho GPS-grade (20m + 20m)
+      // yêu cầu di chuyển 45m mới gửi, quá chặt cho tracking thực tế.
+      // Cap ở ACCURACY_GPS_GRADE_M: fix approx/network (>20m) không được inflate
+      // threshold vượt quá mức cần thiết.
+      const accLatest = Math.min(
+        latest.accuracy ?? ACCURACY_GPS_GRADE_M,
+        ACCURACY_GPS_GRADE_M,
+      );
+      const accLast = Math.min(
+        last.acc ?? ACCURACY_GPS_GRADE_M,
+        ACCURACY_GPS_GRADE_M,
+      );
+      const effectiveDistance = rawDistance - Math.max(accLatest, accLast);
+      if (effectiveDistance < threshold) return null;
     }
   }
   return {
@@ -315,12 +333,12 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
         JSON.stringify(ingest!.remaining),
       );
     }
-    await setLastSent(latest.latitude, latest.longitude);
+    await setLastSent(latest.latitude, latest.longitude, latest.accuracy);
   } else {
     // Heartbeat-only: bump lastSent.t để rate-limit heartbeat kế tiếp.
-    // KHÔNG đổi lastSent.lat/lon (vị trí thật vẫn ở fix gần nhất).
+    // KHÔNG đổi lastSent.lat/lon/acc (vị trí thật vẫn ở fix gần nhất).
     const last = await getLastSent();
-    await setLastSent(last?.lat ?? 0, last?.lon ?? 0);
+    await setLastSent(last?.lat ?? 0, last?.lon ?? 0, last?.acc);
   }
 }
 
@@ -529,14 +547,14 @@ export async function startForegroundLocation(
   await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
     // distanceInterval=0: OS wake task đều theo timeInterval bất kể di chuyển
-    // hay không → cha mẹ luôn thấy "device còn sống" qua last_seen.
+    // hay không → người quản lý luôn thấy "device còn sống" qua last_seen.
     distanceInterval: 0,
     timeInterval: safeInterval,
     deferredUpdatesInterval: safeInterval,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: '📍 Đang giám sát vị trí',
-      notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản phụ huynh.',
+      notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản quản lý.',
       notificationColor: '#1976D2',
       killServiceOnDestroy: false,
     },

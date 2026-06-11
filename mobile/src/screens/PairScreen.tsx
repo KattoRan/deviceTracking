@@ -16,7 +16,6 @@ import {
   PAIRING_CODE_REGEX,
   PHONE_REGEX,
   type PairDeviceRequest,
-  type PersonType,
 } from '../models/types';
 import { ApiError, pairDevice } from '../services/apiService';
 
@@ -34,7 +33,6 @@ export default function PairScreen() {
 
   const [pairingCode, setPairingCode] = useState('');
   const [personName, setPersonName] = useState('');
-  const [personType, setPersonType] = useState<PersonType>('CHILD');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -70,7 +68,6 @@ export default function PairScreen() {
     const payload: PairDeviceRequest = {
       pairingCode: pairingCode.trim(),
       personName: personName.trim(),
-      personType,
       phoneNumber: phoneNumber.trim() || undefined,
       device: { model: deviceModel, type: deviceType, os: deviceOS },
     };
@@ -80,7 +77,6 @@ export default function PairScreen() {
       await saveDeviceData({
         deviceId: res.deviceId,
         personName: res.personName,
-        personType: res.personType,
         pairedAt: new Date().toISOString(),
       });
     } catch (err) {
@@ -106,10 +102,10 @@ export default function PairScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.headerCard}>
-          <Text style={styles.headerTitle}>👨‍👩‍👧 Ghép với tài khoản phụ huynh</Text>
+          <Text style={styles.headerTitle}>Ghép với tài khoản quản lý</Text>
           <Text style={styles.headerSubtitle}>
-            Nhập <Text style={styles.bold}>pairing code</Text> phụ huynh đã tạo
-            trên ứng dụng web để kết nối thiết bị này với tài khoản gia đình.
+            Nhập <Text style={styles.bold}>pairing code</Text> người quản lý đã tạo
+            trên ứng dụng web để kết nối thiết bị này với tài khoản quản lý.
           </Text>
         </View>
 
@@ -150,22 +146,6 @@ export default function PairScreen() {
             error={errors.personName}
             editable={!submitting}
           />
-
-          <Text style={styles.label}>Loại</Text>
-          <View style={styles.choiceRow}>
-            <ChoiceButton
-              label="👶 Trẻ em"
-              active={personType === 'CHILD'}
-              onPress={() => setPersonType('CHILD')}
-              disabled={submitting}
-            />
-            <ChoiceButton
-              label="👴 Người già"
-              active={personType === 'ELDERLY'}
-              onPress={() => setPersonType('ELDERLY')}
-              disabled={submitting}
-            />
-          </View>
 
           <Field
             label="Số điện thoại"

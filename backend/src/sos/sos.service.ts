@@ -92,14 +92,13 @@ export class SosService {
       orderBy: { triggered_at: 'desc' },
       take: limit,
       include: {
-        device: { select: { id: true, person_name: true, person_type: true } },
+        device: { select: { id: true, person_name: true } },
       },
     });
     return events.map((e) => ({
       id: e.id,
       deviceId: e.device_id,
       personName: e.device.person_name,
-      personType: e.device.person_type,
       lat: Number(e.lat),
       lon: Number(e.lon),
       accuracy: e.accuracy_m,

@@ -30,7 +30,6 @@ export interface GeofenceDetail extends GeofenceListItem {
     id: string;
     name: string;
     person_name: string;
-    person_type: string;
     phone_number: string | null;
   }>;
 }
@@ -473,7 +472,6 @@ export class GeofencesService {
               select: {
                 id: true,
                 person_name: true,
-                person_type: true,
                 phone_number: true,
               },
             },
@@ -498,7 +496,6 @@ export class GeofencesService {
         id: dg.device.id,
         name: dg.device.person_name,
         person_name: dg.device.person_name,
-        person_type: dg.device.person_type,
         phone_number: dg.device.phone_number,
       })),
     };
