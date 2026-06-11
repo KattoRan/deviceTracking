@@ -54,15 +54,3 @@ export interface CommandStatusChangedEvent {
   error?: string | null;
 }
 
-export interface TrackingIntervalChangedEvent {
-  intervalSec: number;
-  updatedAt: string;
-}
-
-export interface TrackingIntervalSettings {
-  intervalSec: number;
-  updatedAt: string;
-}
-
-export const TRACKING_INTERVAL_CHOICES = [5, 30, 60] as const;
-export type TrackingIntervalSec = (typeof TRACKING_INTERVAL_CHOICES)[number];

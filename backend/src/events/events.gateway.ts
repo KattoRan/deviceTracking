@@ -69,11 +69,6 @@ export interface CommandStatusChangedEvent {
   error?: string | null;
 }
 
-export interface TrackingIntervalChangedEvent {
-  intervalSec: number;
-  updatedAt: string;
-}
-
 export interface DeviceDeletedEvent {
   deviceId: string;
 }
@@ -203,7 +198,7 @@ export class EventsGateway
   /**
    * Mobile clients call this right after connect to subscribe to commands
    * targeted at them. Frontends don't need to join — they just listen for
-   * broadcast `command_status_changed` and `tracking_interval_changed`.
+   * broadcast `command_status_changed`.
    */
   @SubscribeMessage('join_device')
   handleJoinDevice(
@@ -262,14 +257,6 @@ export class EventsGateway
   /** Broadcast so every frontend observing this device can update its UI. */
   emitCommandStatusChanged(event: CommandStatusChangedEvent) {
     this.server.emit('command_status_changed', event);
-  }
-
-  /**
-   * Global fan-out — every connected device and every frontend receives it.
-   * Per product requirement the tracking interval is a single shared value.
-   */
-  emitTrackingIntervalChanged(event: TrackingIntervalChangedEvent) {
-    this.server.emit('tracking_interval_changed', event);
   }
 
   /**

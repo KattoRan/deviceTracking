@@ -94,12 +94,6 @@ model device_commands {
   @@index([created_at])
 }
 
-model app_settings {
-  key        String   @id
-  value      Json
-  updated_at DateTime @default(now()) @updatedAt
-}
-
 model location_history {
   id        String  @id @default(uuid())
   device_id String

@@ -7,7 +7,7 @@ import type {
   PairDeviceResponse,
   SosRequest,
   SosResponse,
-  TrackingIntervalResponse,
+
 } from '../models/types';
 
 export class ApiError extends Error {
@@ -93,13 +93,6 @@ export function sendIngestData(
     method: 'POST',
     body: JSON.stringify(payload),
     headers: { 'x-device-id': deviceId },
-  });
-}
-
-
-export function fetchTrackingInterval(): Promise<TrackingIntervalResponse> {
-  return request<TrackingIntervalResponse>('api/v1/settings/tracking-interval', {
-    method: 'GET',
   });
 }
 

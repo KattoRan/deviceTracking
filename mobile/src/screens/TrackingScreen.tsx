@@ -14,7 +14,6 @@ import {
   View,
 } from 'react-native';
 import SosButton from '../components/SosButton';
-import { DEFAULT_TRACKING_INTERVAL_MS } from '../config/api';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { useLocation } from '../hooks/useLocation';
 import type {
@@ -25,12 +24,10 @@ import type {
 } from '../models/types';
 import {
   fetchAdminContact,
-  fetchTrackingInterval,
   sendIngestData,
 } from '../services/apiService';
 import { getCellTowerInfo } from '../services/cellInfoService';
 import {
-  restartForegroundLocation,
   startForegroundLocation,
   stopForegroundLocation,
 } from '../services/foregroundLocationService';
@@ -42,7 +39,6 @@ import {
 import {
   ackCommand,
   onCommand,
-  onTrackingIntervalChanged,
   sendCommandResult,
 } from '../services/socketService';
 
@@ -68,7 +64,6 @@ export default function TrackingScreen() {
   // /ingest. In-activity tick interval skip để tránh duplicate location_history.
   // useLocation hook vẫn watch để cấp `location` cho UI (SosButton lastKnown).
   const [serviceActive, setServiceActive] = useState(false);
-  const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_TRACKING_INTERVAL_MS);
   const [adminContact, setAdminContact] = useState<AdminContact | null>(null);
   const [contactLoading, setContactLoading] = useState(true);
   const [sosResult, setSosResult] = useState<{
@@ -77,10 +72,6 @@ export default function TrackingScreen() {
   } | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // intervalMs đã apply vào foreground service. Null = service chưa start.
-  // So với state intervalMs hiện tại để biết khi nào phải restart service
-  // với value mới (tracking_interval_changed event từ admin).
-  const appliedIntervalRef = useRef<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isActiveRef = useRef(false);
   // Once-per-mount guard so the auto-start effect doesn't re-fire when
@@ -191,12 +182,10 @@ export default function TrackingScreen() {
 
     // Khởi tạo foreground service — service tiếp tục gửi telemetry khi user
     // minimize app / khóa màn hình. Service success thì in-activity tick
-    // interval sẽ skip để tránh duplicate location_history (xem effect bên dưới).
-    // Truyền intervalMs hiện tại để OS task wake đúng tần suất admin chọn.
-    const fgRes = await startForegroundLocation(intervalMs);
+    // sẽ skip để tránh duplicate location_history (xem effect bên dưới).
+    const fgRes = await startForegroundLocation();
     if (fgRes.ok) {
       setServiceActive(true);
-      appliedIntervalRef.current = intervalMs;
     } else if (fgRes.reason) {
       console.warn('[tracking] foreground service start failed:', fgRes.reason);
     }
@@ -206,7 +195,7 @@ export default function TrackingScreen() {
     // đầu tiên — chấp nhận để có UX "ngay lập tức thấy device online".
     await sendTelemetry({ forceFresh: true });
     return true;
-  }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry, intervalMs]);
+  }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry]);
 
   const stopTracking = useCallback(() => {
     if (intervalRef.current) {
@@ -216,7 +205,6 @@ export default function TrackingScreen() {
     stopWatching();
     void stopForegroundLocation();
     setServiceActive(false);
-    appliedIntervalRef.current = null;
     disconnectMqtt();
     setIsActive(false);
   }, [stopWatching]);
@@ -231,58 +219,22 @@ export default function TrackingScreen() {
     void startTracking();
   }, [storedData?.deviceId, startTracking]);
 
-  // (Re)create the periodic timer whenever isActive flips or the global
-  // interval changes — this is how the remote `tracking_interval_changed`
-  // broadcast actually takes effect on an already-running tracker.
-  //
-  // Skip nếu foreground service đang chạy: service đã có TaskManager task
-  // tự fire mỗi intervalMs, in-activity tick sẽ tạo duplicate /ingest call.
+  // Flush buffer mỗi 30s khi app đang foreground và service chưa chạy.
+  // Skip nếu foreground service đang chạy: TaskManager task đã tự flush,
+  // tránh duplicate /ingest call.
   useEffect(() => {
     if (!isActive || serviceActive) return;
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(() => {
       void sendTelemetry();
-    }, intervalMs);
+    }, 30_000);
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [isActive, serviceActive, intervalMs, sendTelemetry]);
-
-  // Khi admin đổi tracking interval từ web, restart service với tần suất
-  // mới (OS task không đổi timeInterval runtime được, phải stop + start).
-  // Chỉ chạy khi service đang active VÀ value khác value đã apply lúc start.
-  useEffect(() => {
-    if (!serviceActive) return;
-    if (appliedIntervalRef.current === null) return;
-    if (appliedIntervalRef.current === intervalMs) return;
-    appliedIntervalRef.current = intervalMs;
-    void restartForegroundLocation(intervalMs);
-  }, [serviceActive, intervalMs]);
-
-  // Pull the current global interval on mount so the very first tick uses
-  // whatever the operator last set.
-  useEffect(() => {
-    let cancelled = false;
-    fetchTrackingInterval()
-      .then((res) => {
-        if (!cancelled) setIntervalMs(res.intervalSec * 1000);
-      })
-      .catch(() => {
-        // keep the default — tracking still works offline
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    return onTrackingIntervalChanged((event) => {
-      setIntervalMs(event.intervalSec * 1000);
-    });
-  }, []);
+  }, [isActive, serviceActive, sendTelemetry]);
 
   // Fetch admin contact info once we have a deviceId. Showing admin name
   // and phone on this screen so the monitored person can always call back
@@ -479,7 +431,7 @@ export default function TrackingScreen() {
           </View>
           <Text style={styles.placeholder}>
             {isActive
-              ? `Đang gửi vị trí mỗi ${Math.round(intervalMs / 1000)} giây khi mở ứng dụng.`
+              ? 'Đang gửi vị trí khi di chuyển và heartbeat mỗi 30s.'
               : 'Mở ứng dụng để tiếp tục gửi vị trí thời gian thực.'}
           </Text>
         </View>

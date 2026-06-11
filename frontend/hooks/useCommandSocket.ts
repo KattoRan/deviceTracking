@@ -3,14 +3,10 @@
 import { useEffect, useRef } from "react";
 import { io, type Socket } from "socket.io-client";
 import { API_BASE_URL } from "@/lib/api";
-import type {
-  CommandStatusChangedEvent,
-  TrackingIntervalChangedEvent,
-} from "@/types/command";
+import type { CommandStatusChangedEvent } from "@/types/command";
 
 interface Handlers {
   onCommandStatusChanged?: (e: CommandStatusChangedEvent) => void;
-  onTrackingIntervalChanged?: (e: TrackingIntervalChangedEvent) => void;
 }
 
 /**
@@ -39,16 +35,8 @@ export function useCommandSocket(handlers: Handlers) {
       handlersRef.current.onCommandStatusChanged?.(event);
     });
 
-    socket.on(
-      "tracking_interval_changed",
-      (event: TrackingIntervalChangedEvent) => {
-        handlersRef.current.onTrackingIntervalChanged?.(event);
-      },
-    );
-
     return () => {
       socket.off("command_status_changed");
-      socket.off("tracking_interval_changed");
       socket.disconnect();
     };
   }, []);

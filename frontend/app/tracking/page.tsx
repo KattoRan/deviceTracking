@@ -50,11 +50,6 @@ const DeviceDetailPanel = dynamic(
   { ssr: false },
 );
 
-const TrackingIntervalControl = dynamic(
-  () => import("@/components/tracking/TrackingIntervalControl"),
-  { ssr: false },
-);
-
 const AnimatePresence = dynamic(
   () => import("framer-motion").then((m) => m.AnimatePresence),
   { ssr: false },
@@ -340,8 +335,6 @@ function TrackingPageInner() {
           showGeofences={showGeofences}
           onToggleGeofences={() => setShowGeofences((v) => !v)}
         />
-
-        <TrackingIntervalControl />
 
         <AnimatePresence>
           {effectiveSelected && (

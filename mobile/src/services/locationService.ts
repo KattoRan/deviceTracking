@@ -73,7 +73,7 @@ export async function watchLocation(
         // turns and short walks. Combined with the tiered quality filter
         // this gives a smoother trail without re-introducing noise: only
         // gps-grade fixes are actually drawn server-side.
-        distanceInterval: 5, // metres
+        distanceInterval: 10, // metres
         timeInterval: 5_000, // ms — Android only
       },
       ({ coords, timestamp }) => {

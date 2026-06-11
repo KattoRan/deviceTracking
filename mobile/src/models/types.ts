@@ -137,11 +137,6 @@ export interface CommandDispatchEvent {
   payload: Record<string, unknown>;
 }
 
-export interface TrackingIntervalChangedEvent {
-  intervalSec: number;
-  updatedAt: string;
-}
-
 export interface GeofenceBreachEvent {
   deviceId: string;
   deviceName: string | null;
@@ -171,11 +166,6 @@ export interface CommandResultBody {
   success: boolean;
   error?: string | null;
   data?: Record<string, unknown>;
-}
-
-export interface TrackingIntervalResponse {
-  intervalSec: number;
-  updatedAt: string;
 }
 
 export type RootStackParamList = {

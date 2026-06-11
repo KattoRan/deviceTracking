@@ -7,12 +7,11 @@ import type {
   DeviceLockChangedEvent,
   DeviceMovedEvent,
   GeofenceBreachEvent,
-  TrackingIntervalChangedEvent,
+
 } from '../models/types';
 
 type DeviceMovedCallback = (event: DeviceMovedEvent) => void;
 type CommandCallback = (event: CommandDispatchEvent) => void;
-type TrackingIntervalCallback = (event: TrackingIntervalChangedEvent) => void;
 type GeofenceBreachCallback = (event: GeofenceBreachEvent) => void;
 type DeviceDeletedCallback = (event: DeviceDeletedEvent) => void;
 type DeviceLockChangedCallback = (event: DeviceLockChangedEvent) => void;
@@ -21,7 +20,6 @@ let socket: Socket | null = null;
 let joinedDeviceId: string | null = null;
 const deviceMovedListeners = new Set<DeviceMovedCallback>();
 const commandListeners = new Set<CommandCallback>();
-const trackingIntervalListeners = new Set<TrackingIntervalCallback>();
 const geofenceBreachListeners = new Set<GeofenceBreachCallback>();
 const deviceDeletedListeners = new Set<DeviceDeletedCallback>();
 const deviceLockChangedListeners = new Set<DeviceLockChangedCallback>();
@@ -38,7 +36,7 @@ function fanOut<T>(listeners: Set<(event: T) => void>, event: T): void {
 
 /**
  * Lazily connects to the backend Socket.IO gateway and registers dispatchers
- * for device_moved, command, and tracking_interval_changed. Calling this
+ * for device_moved, command, geofence_breach, and device events. Calling this
  * while a socket already exists is a no-op.
  */
 export function connectSocket(): Socket {
@@ -69,11 +67,6 @@ export function connectSocket(): Socket {
   );
   socket.on('command', (event: CommandDispatchEvent) =>
     fanOut(commandListeners, event),
-  );
-  socket.on(
-    'tracking_interval_changed',
-    (event: TrackingIntervalChangedEvent) =>
-      fanOut(trackingIntervalListeners, event),
   );
   socket.on('geofence_breach', (event: GeofenceBreachEvent) =>
     fanOut(geofenceBreachListeners, event),
@@ -132,16 +125,6 @@ export function onCommand(cb: CommandCallback): () => void {
   commandListeners.add(cb);
   return () => {
     commandListeners.delete(cb);
-  };
-}
-
-export function onTrackingIntervalChanged(
-  cb: TrackingIntervalCallback,
-): () => void {
-  if (!socket) connectSocket();
-  trackingIntervalListeners.add(cb);
-  return () => {
-    trackingIntervalListeners.delete(cb);
   };
 }
 

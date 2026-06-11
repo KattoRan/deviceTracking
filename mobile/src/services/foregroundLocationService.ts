@@ -20,10 +20,10 @@ const MAX_ACCEPTABLE_ACCURACY_M = 200;
 const FLUSH_BATCH_LIMIT = 50;
 
 // H1 — Decouple sampling vs sending:
-// - Service wake mỗi `timeInterval = intervalMs` (admin chọn 5/30/60s).
-// - /ingest gửi khi di chuyển ≥ MOVEMENT_THRESHOLD_M (skip nếu đứng yên).
-// - /heartbeat chỉ gửi mỗi HEARTBEAT_MIN_INTERVAL_MS để giữ last_seen
-//   refresh nhưng không spam khi user đứng yên + tick nhanh.
+// - OS wake task theo distanceInterval (25m) HOẶC timeInterval (30s).
+// - /ingest gửi khi di chuyển đủ (movement gate accuracy-adjusted).
+// - /heartbeat chỉ gửi mỗi HEARTBEAT_MIN_INTERVAL_MS (30s MOVING, 60s STILL)
+//   để giữ last_seen refresh nhưng không spam khi đứng yên.
 const MOVEMENT_THRESHOLD_M = 5;
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
@@ -517,18 +517,15 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   await sendTelemetry(deviceId, force);
 });
 
-const DEFAULT_INTERVAL_MS = 30_000;
-
 /**
- * Bật foreground service tracking. `intervalMs` = admin-set tick rate (5/30/60s)
- * — driver cho `timeInterval` của OS task. Throttle ingest/heartbeat ở task
- * level gating riêng (movement-based, time-based). Cần permission
- * `ACCESS_FINE_LOCATION` đã grant. KHÔNG cần `ACCESS_BACKGROUND_LOCATION`
+ * Bật foreground service tracking.
+ * - distanceInterval=25m: OS chỉ deliver fix khi thiết bị thực sự di chuyển,
+ *   tiết kiệm pin so với distanceInterval=0.
+ * - timeInterval=30s: fallback wake để heartbeat vẫn chạy khi đứng yên.
+ * Cần permission `ACCESS_FINE_LOCATION`. KHÔNG cần `ACCESS_BACKGROUND_LOCATION`
  * vì khởi tạo từ activity foreground + có foregroundService config (Android 12+).
  */
-export async function startForegroundLocation(
-  intervalMs: number = DEFAULT_INTERVAL_MS,
-): Promise<{ ok: boolean; reason?: string }> {
+export async function startForegroundLocation(): Promise<{ ok: boolean; reason?: string }> {
   const fg = await Location.getForegroundPermissionsAsync();
   if (fg.status !== 'granted') {
     return { ok: false, reason: 'Chưa cấp quyền vị trí' };
@@ -543,14 +540,14 @@ export async function startForegroundLocation(
   // Sub ở module level — TaskManager headless task đọc accelBuffer cùng JS context.
   subscribeAccelerometer();
 
-  const safeInterval = Math.max(1000, intervalMs);
   await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
-    // distanceInterval=0: OS wake task đều theo timeInterval bất kể di chuyển
-    // hay không → người quản lý luôn thấy "device còn sống" qua last_seen.
-    distanceInterval: 0,
-    timeInterval: safeInterval,
-    deferredUpdatesInterval: safeInterval,
+    // distanceInterval=25m: OS wake task khi di chuyển ≥25m — coarse filter trước
+    // khi movement gate accuracy-adjusted ở app level.
+    distanceInterval: 25,
+    // timeInterval=30s: đảm bảo heartbeat khi đứng yên (distanceInterval không fire).
+    timeInterval: HEARTBEAT_MIN_INTERVAL_MS,
+    deferredUpdatesInterval: HEARTBEAT_MIN_INTERVAL_MS,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: '📍 Đang giám sát vị trí',
@@ -564,22 +561,15 @@ export async function startForegroundLocation(
   return { ok: true };
 }
 
-/**
- * Đổi tần suất tick — stop service rồi start lại với intervalMs mới. Chỉ
- * hoạt động khi activity đang foreground (yêu cầu của OS để start FG
- * service); nếu app minimized lúc admin đổi interval → giá trị cũ giữ
- * nguyên đến khi user mở app.
- */
-export async function restartForegroundLocation(
-  intervalMs: number,
-): Promise<{ ok: boolean; reason?: string }> {
+/** Restart service — dùng khi cần reset task (vd sau khi app resume). */
+export async function restartForegroundLocation(): Promise<{ ok: boolean; reason?: string }> {
   const running = await Location.hasStartedLocationUpdatesAsync(
     FOREGROUND_LOCATION_TASK,
   );
   if (running) {
     await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
   }
-  return startForegroundLocation(intervalMs);
+  return startForegroundLocation();
 }
 
 export async function stopForegroundLocation(): Promise<void> {
