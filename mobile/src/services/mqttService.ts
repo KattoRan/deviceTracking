@@ -1,6 +1,7 @@
 import mqtt, { type MqttClient } from 'mqtt';
 import { MQTT_CONFIG } from '../config/api';
 import type { IngestPayload } from '../models/types';
+import { Alert } from 'react-native';
 
 type ConnectionListener = (connected: boolean) => void;
 
@@ -70,6 +71,7 @@ export function publishTelemetry(
       resolve(false);
       return;
     }
+    Alert.alert('Publishing telemetry', JSON.stringify(payload));
     client.publish(
       `device/${deviceId}/telemetry`,
       JSON.stringify(payload),
