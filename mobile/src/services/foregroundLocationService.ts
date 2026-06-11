@@ -542,10 +542,12 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
 
   await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
-    // distanceInterval=25m: OS wake task khi di chuyển ≥25m — coarse filter trước
-    // khi movement gate accuracy-adjusted ở app level.
-    distanceInterval: 25,
-    // timeInterval=30s: đảm bảo heartbeat khi đứng yên (distanceInterval không fire).
+    // distanceInterval=0: bắt buộc để task fire theo timeInterval kể cả khi
+    // đứng yên — iOS distanceFilter và Android smallestDisplacement đều chặn
+    // callback nếu >0 và device chưa di chuyển đủ. Heartbeat sẽ bị mất.
+    // Coarse filter 25m được áp ở movement gate (app level) thay vì OS level.
+    distanceInterval: 0,
+    // timeInterval=30s: wake task đều đặn → heartbeat khi still, flush khi moving.
     timeInterval: HEARTBEAT_MIN_INTERVAL_MS,
     deferredUpdatesInterval: HEARTBEAT_MIN_INTERVAL_MS,
     showsBackgroundLocationIndicator: true,
