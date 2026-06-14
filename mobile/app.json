@@ -30,6 +30,7 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
         "POST_NOTIFICATIONS",
@@ -44,7 +45,8 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "Ứng dụng cần truy cập vị trí để gửi telemetry GPS về máy chủ.",
-          "isAndroidForegroundServiceEnabled": true
+          "isAndroidForegroundServiceEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
         }
       ]
     ]
