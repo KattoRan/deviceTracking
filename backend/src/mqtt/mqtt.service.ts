@@ -81,6 +81,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
+      this.logger.log(`mqtt telemetry deviceId=${deviceId}`);
       await this.ingestService.saveData(deviceId, parsed as SubmitDataDto);
     } catch (err) {
       this.logger.warn(

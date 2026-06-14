@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Logger, Post } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SubmitDataDto } from './dto/submit-data.dto';
 import { IngestService } from './ingest.service';
@@ -6,6 +6,7 @@ import { IngestService } from './ingest.service';
 @ApiTags('ingest')
 @Controller('api/v1/ingest')
 export class IngestController {
+  private readonly logger = new Logger(IngestController.name);
   constructor(private readonly ingestService: IngestService) {}
 
   @Post()
@@ -22,6 +23,7 @@ export class IngestController {
     @Body() dto: SubmitDataDto,
     @Headers('x-device-id') deviceId: string,
   ) {
+    this.logger.log(`ingest deviceId=${deviceId} locations=${dto.locations?.length ?? 0} battery=${dto.batteryLevel ?? '-'}`);
     return this.ingestService.saveData(deviceId, dto);
   }
 }
