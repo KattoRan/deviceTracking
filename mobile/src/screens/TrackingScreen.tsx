@@ -186,8 +186,16 @@ export default function TrackingScreen() {
     const fgRes = await startForegroundLocation();
     if (fgRes.ok) {
       setServiceActive(true);
-    } else if (fgRes.reason) {
+    } else {
       console.warn('[tracking] foreground service start failed:', fgRes.reason);
+      Alert.alert(
+        'Không bật được giám sát nền',
+        `${fgRes.reason ?? 'Lỗi không xác định'}.\n\nVào Cài đặt → Ứng dụng → deviceTracking → Quyền → Vị trí → chọn "Luôn cho phép".`,
+        [
+          { text: 'Mở Cài đặt', onPress: () => Linking.openSettings() },
+          { text: 'Bỏ qua' },
+        ],
+      );
     }
 
     // Fire once immediately so the server sees a fresh fix without waiting.

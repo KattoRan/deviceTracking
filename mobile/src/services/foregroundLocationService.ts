@@ -481,6 +481,7 @@ async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
  * không qua React tree. Hàm phải tồn tại trước `startLocationUpdatesAsync`.
  */
 TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
+  console.log('[fg-location] task fired', new Date().toISOString());
   if (error) {
     console.warn('[fg-location] task error:', error);
     return;
@@ -538,6 +539,7 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
 
   if (Platform.OS === 'android') {
     const bg = await Location.requestBackgroundPermissionsAsync();
+    console.log('[fg-location] background permission status:', bg.status);
     if (bg.status !== 'granted') {
       return { ok: false, reason: 'Chưa cấp quyền vị trí nền (background location)' };
     }
@@ -552,27 +554,34 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
   // Sub ở module level — TaskManager headless task đọc accelBuffer cùng JS context.
   subscribeAccelerometer();
 
-  await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
-    accuracy: Location.Accuracy.High,
-    // distanceInterval=0: bắt buộc để task fire theo timeInterval kể cả khi
-    // đứng yên — iOS distanceFilter và Android smallestDisplacement đều chặn
-    // callback nếu >0 và device chưa di chuyển đủ. Heartbeat sẽ bị mất.
-    // Coarse filter 25m được áp ở movement gate (app level) thay vì OS level.
-    distanceInterval: 0,
-    // timeInterval=30s: wake task đều đặn → heartbeat khi still, flush khi moving.
-    timeInterval: HEARTBEAT_MIN_INTERVAL_MS,
-    deferredUpdatesInterval: HEARTBEAT_MIN_INTERVAL_MS,
-    showsBackgroundLocationIndicator: true,
-    foregroundService: {
-      notificationTitle: '📍 Đang giám sát vị trí',
-      notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản quản lý.',
-      notificationColor: '#1976D2',
-      killServiceOnDestroy: false,
-    },
-    pausesUpdatesAutomatically: false,
-    activityType: Location.ActivityType.OtherNavigation,
-  });
-  return { ok: true };
+  try {
+    await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
+      accuracy: Location.Accuracy.High,
+      // distanceInterval=0: bắt buộc để task fire theo timeInterval kể cả khi
+      // đứng yên — iOS distanceFilter và Android smallestDisplacement đều chặn
+      // callback nếu >0 và device chưa di chuyển đủ. Heartbeat sẽ bị mất.
+      // Coarse filter 25m được áp ở movement gate (app level) thay vì OS level.
+      distanceInterval: 0,
+      // timeInterval=30s: wake task đều đặn → heartbeat khi still, flush khi moving.
+      timeInterval: HEARTBEAT_MIN_INTERVAL_MS,
+      deferredUpdatesInterval: HEARTBEAT_MIN_INTERVAL_MS,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: '📍 Đang giám sát vị trí',
+        notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản quản lý.',
+        notificationColor: '#1976D2',
+        killServiceOnDestroy: false,
+      },
+      pausesUpdatesAutomatically: false,
+      activityType: Location.ActivityType.OtherNavigation,
+    });
+    console.log('[fg-location] startLocationUpdatesAsync OK');
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[fg-location] startLocationUpdatesAsync failed:', msg);
+    return { ok: false, reason: msg };
+  }
 }
 
 /** Restart service — dùng khi cần reset task (vd sau khi app resume). */
