@@ -81,7 +81,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      console.log(`Received telemetry for ${deviceId}:`, parsed);
       await this.ingestService.saveData(deviceId, parsed as SubmitDataDto);
     } catch (err) {
       this.logger.warn(
