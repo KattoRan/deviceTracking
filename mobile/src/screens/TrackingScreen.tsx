@@ -270,6 +270,8 @@ export default function TrackingScreen() {
   // mobile thấy lần sau mở app. Dùng prev-state riêng — không share
   // `appStateRef` với listener telemetry để tránh race khi cả 2 listener
   // cùng fire trên 1 event (thứ tự không đảm bảo).
+  // Nếu serviceActive=false (service chưa start được, vd do thiếu permission),
+  // thử lại khi app quay về foreground — user có thể đã grant permission từ Settings.
   useEffect(() => {
     if (!storedData?.deviceId) return;
     const deviceId = storedData.deviceId;
@@ -281,10 +283,16 @@ export default function TrackingScreen() {
         fetchAdminContact(deviceId)
           .then((info) => setAdminContact(info))
           .catch(() => undefined);
+        // Retry service start nếu trước đó bị từ chối permission.
+        if (isActiveRef.current && !serviceActive) {
+          void startForegroundLocation().then((res) => {
+            if (res.ok) setServiceActive(true);
+          });
+        }
       }
     });
     return () => sub.remove();
-  }, [storedData?.deviceId]);
+  }, [storedData?.deviceId, serviceActive]);
 
   // Auto-dismiss SOS feedback after 3s.
   useEffect(() => {
