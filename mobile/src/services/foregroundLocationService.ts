@@ -545,10 +545,20 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
     }
   }
 
+  // Nếu native vẫn giữ stale state từ session trước → stop trước để đảm bảo
+  // foreground service được restart sạch. Không return sớm nếu "already" vì
+  // service có thể đã chết nhưng native TaskManager chưa biết (không có notification).
   const already = await Location.hasStartedLocationUpdatesAsync(
     FOREGROUND_LOCATION_TASK,
   );
-  if (already) return { ok: true };
+  if (already) {
+    console.log('[fg-location] task already registered, stopping first to force clean restart');
+    try {
+      await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
+    } catch {
+      // ignore — tiếp tục start lại
+    }
+  }
 
   // Bật accelerometer subscription để task có dữ liệu motion detection.
   // Sub ở module level — TaskManager headless task đọc accelBuffer cùng JS context.
