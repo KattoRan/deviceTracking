@@ -7,7 +7,7 @@ import { Vibration } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
-import { publishTelemetry } from './mqttService';
+import { connectMqtt, isMqttConnected, publishTelemetry } from './mqttService';
 
 export const FOREGROUND_LOCATION_TASK = 'foreground-location-task';
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
@@ -118,7 +118,9 @@ function unsubscribeAccelerometer(): void {
  * như MOVING (cẩn trọng, không skip ingest).
  */
 function isStill(): boolean {
-  if (accelBuffer.length < 10) return false;
+  // Buffer rỗng = headless mode sau process kill (accelerometer chưa subscribe).
+  // Không có data → không biết trạng thái → assume still (conservative).
+  if (accelBuffer.length < 10) return true;
   const n = accelBuffer.length;
   let sum = 0;
   for (let i = 0; i < n; i++) sum += accelBuffer[i];
@@ -300,7 +302,11 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
   if (hasLocations) payload.locations = ingest!.toSend;
   if (lastFixTime != null) payload.lastFixAt = lastFixTime;
 
-  // MQTT-first (kết nối persistent, không TLS handshake mỗi tick).
+  // MQTT-first. Nếu client chưa có (headless restart / connection drop), thử
+  // reconnect không đồng bộ — tick này vẫn fallback HTTP, tick sau dùng MQTT.
+  if (!isMqttConnected()) {
+    try { connectMqtt(deviceId); } catch { /* ignore */ }
+  }
   let success = await publishTelemetry(deviceId, payload);
 
   // HTTP fallback nếu MQTT fail.
@@ -538,25 +544,19 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
     return { ok: false, reason: 'Chưa cấp quyền vị trí' };
   }
 
-  // Nếu native vẫn giữ stale state từ session trước → stop trước để đảm bảo
-  // foreground service được restart sạch. Không return sớm nếu "already" vì
-  // service có thể đã chết nhưng native TaskManager chưa biết (không có notification).
-  const already = await Location.hasStartedLocationUpdatesAsync(
-    FOREGROUND_LOCATION_TASK,
-  );
-  if (already) {
-    console.log('[fg-location] task already registered, stopping first to force clean restart');
-    try {
-      await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
-    } catch {
-      // ignore — tiếp tục start lại
-    }
-  }
-
   // Bật accelerometer subscription để task có dữ liệu motion detection.
   // Sub ở module level — TaskManager headless task đọc accelBuffer cùng JS context.
-  subscribeAccelerometer();
+  try {
+    subscribeAccelerometer();
+  } catch {
+    // Sensor không available trên thiết bị này — movement gate fallback về "moving".
+  }
 
+  // Gọi startLocationUpdatesAsync trực tiếp — không check hasStartedLocationUpdatesAsync
+  // trước vì native xử lý gracefully:
+  //   • Chưa có task → start mới, hiện notification
+  //   • Đã có task → gọi setOptions() (re-register FusedLocationProvider), notification giữ nguyên
+  // Stop trước rồi start lại tạo gap tracking + notification nhấp nháy mỗi lần mở app.
   try {
     await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
