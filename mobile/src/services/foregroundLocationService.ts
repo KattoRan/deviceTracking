@@ -3,7 +3,7 @@ import * as Battery from 'expo-battery';
 import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
 import * as TaskManager from 'expo-task-manager';
-import { Platform, Vibration } from 'react-native';
+import { Vibration } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
@@ -529,20 +529,13 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
  * Bật foreground service tracking.
  * - distanceInterval=0: bắt buộc để OS fire theo timeInterval kể cả khi đứng yên.
  * - timeInterval=30s: heartbeat + flush đều đặn. Filter 25m áp ở movement gate.
- * Android 10+: cần cả ACCESS_BACKGROUND_LOCATION để startLocationUpdatesAsync không throw.
+ * Foreground service với foregroundServiceType=location chỉ cần ACCESS_FINE_LOCATION —
+ * expo-location bỏ qua check background permission khi dùng foreground service.
  */
 export async function startForegroundLocation(): Promise<{ ok: boolean; reason?: string }> {
   const fg = await Location.getForegroundPermissionsAsync();
   if (fg.status !== 'granted') {
     return { ok: false, reason: 'Chưa cấp quyền vị trí' };
-  }
-
-  if (Platform.OS === 'android') {
-    const bg = await Location.requestBackgroundPermissionsAsync();
-    console.log('[fg-location] background permission status:', bg.status);
-    if (bg.status !== 'granted') {
-      return { ok: false, reason: 'Chưa cấp quyền vị trí nền (background location)' };
-    }
   }
 
   // Nếu native vẫn giữ stale state từ session trước → stop trước để đảm bảo
