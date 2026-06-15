@@ -19,7 +19,6 @@ model parent_accounts {
   updated_at    DateTime @default(now()) @updatedAt
 
   devices            devices[]
-  push_subscriptions push_subscriptions[]
   sos_events         sos_events[]
 }
 
@@ -200,17 +199,3 @@ model sos_events {
   @@index([device_id, triggered_at])
 }
 
-model push_subscriptions {
-  id                String   @id @default(uuid())
-  parent_account_id String
-  endpoint          String   @unique
-  p256dh            String
-  auth              String
-  user_agent        String?
-  created_at        DateTime @default(now())
-  last_used_at      DateTime @default(now())
-
-  parent_account parent_accounts @relation(fields: [parent_account_id], references: [id], onDelete: Cascade)
-
-  @@index([parent_account_id])
-}

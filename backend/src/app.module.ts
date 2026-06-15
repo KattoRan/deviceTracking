@@ -12,7 +12,6 @@ import { GeofencesModule } from './geofences/geofences.module';
 import { IngestModule } from './ingest/ingest.module';
 import { MqttModule } from './mqtt/mqtt.module';
 import { PrismaModule } from './prisma/prisma.module';
-import { PushModule } from './push/push.module';
 import { RedisModule } from './redis/redis.module';
 import { SosModule } from './sos/sos.module';
 
@@ -30,7 +29,6 @@ import { SosModule } from './sos/sos.module';
     MqttModule,
     DevicesModule,
     CommandsModule,
-    PushModule,
     SosModule,
   ],
   controllers: [AppController],

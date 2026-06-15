@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { EventsGateway } from '../events/events.gateway';
 import { PrismaService } from '../prisma/prisma.service';
-import { PushService } from '../push/push.service';
 import {
   TriggerSosDto,
   TriggerSosResponseDto,
@@ -20,7 +19,6 @@ export class SosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
-    private readonly push: PushService,
   ) {}
 
   async trigger(
@@ -64,20 +62,6 @@ export class SosService {
       accuracy: dto.accuracy ?? null,
       batteryLevel: dto.batteryLevel ?? null,
       triggeredAt: event.triggered_at.toISOString(),
-    });
-
-    // Fire-and-forget — không chặn response để mobile nhận ACK nhanh.
-    void this.push.send(device.parent_account_id, {
-      type: 'sos',
-      title: '🆘 SOS từ ' + device.person_name,
-      body: 'Người được giám sát vừa bấm SOS. Bấm để xem vị trí.',
-      url: `/tracking?focus=${deviceId}&sos=${event.id}`,
-      data: {
-        deviceId,
-        sosEventId: event.id,
-        lat: dto.lat,
-        lon: dto.lon,
-      },
     });
 
     return {
