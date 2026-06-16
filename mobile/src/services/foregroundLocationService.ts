@@ -3,13 +3,22 @@ import * as Battery from 'expo-battery';
 import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
 import * as TaskManager from 'expo-task-manager';
-import { Vibration } from 'react-native';
+import { AppState, Vibration } from 'react-native';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
 import { connectMqtt, isMqttConnected, publishTelemetry } from './mqttService';
 
 export const FOREGROUND_LOCATION_TASK = 'foreground-location-task';
+
+// Module-level flag — cập nhật qua AppState listener. Dùng để skip HTTP
+// requests đến localhost khi app ở background (OkHttp bị Android throttle,
+// setTimeout trong Promise.race cũng bị defer ~51s → task bị block).
+let isAppForeground = AppState.currentState === 'active';
+AppState.addEventListener('change', (state) => {
+  isAppForeground = state === 'active';
+});
+
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
 const STORAGE_KEY_BUFFER = '@deviceTracking/fgBuffer';
 const STORAGE_KEY_LAST_SENT = '@deviceTracking/fgLastSent'; // {lat, lon, t}
@@ -280,12 +289,15 @@ async function prepareIngest(
 async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
   const ingest = await prepareIngest(force);
   const hasLocations = ingest !== null;
+  console.log(`[fg-location] sendTelemetry entered hasLoc=${hasLocations} force=${force}`);
 
   // Heartbeat-only path bị throttle để không spam khi tick admin = 5s.
   if (!hasLocations && !force) {
     const last = await getLastSent();
     const throttle = isStill() ? HEARTBEAT_STILL_MS : HEARTBEAT_MIN_INTERVAL_MS;
-    if (last && Date.now() - last.t < throttle) return;
+    const elapsed = last ? Date.now() - last.t : -1;
+    console.log(`[fg-location] heartbeat check elapsed=${elapsed}ms throttle=${throttle}ms`);
+    if (last && elapsed < throttle) return;
   }
 
   const batteryLevel = await readBatteryLevel();
@@ -302,29 +314,54 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
   if (hasLocations) payload.locations = ingest!.toSend;
   if (lastFixTime != null) payload.lastFixAt = lastFixTime;
 
-  // MQTT-first. Nếu client chưa có (headless restart / connection drop), thử
-  // reconnect không đồng bộ — tick này vẫn fallback HTTP, tick sau dùng MQTT.
   if (!isMqttConnected()) {
     try { connectMqtt(deviceId); } catch { /* ignore */ }
   }
-  let success = await publishTelemetry(deviceId, payload);
 
-  // HTTP fallback nếu MQTT fail.
-  if (!success) {
-    try {
-      const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.INGEST}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-device-id': deviceId,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) success = true;
-      else if (res.status === 404 && hasLocations) await clearBuffer();
-    } catch {
-      // Network fail — buffer giữ nguyên, lần fire kế tiếp retry.
+  let success: boolean;
+
+  if (isAppForeground) {
+    console.log(`[fg-location] sending via ${isMqttConnected() ? 'MQTT' : 'HTTP'} hasLoc=${hasLocations} force=${force}`);
+    success = await publishTelemetry(deviceId, payload, 1);
+    if (!success) {
+      // HTTP fallback — chỉ trong foreground để tránh localhost fetch treo.
+      try {
+        const res = await fetchWithTimeout(
+          `${API_BASE_URL}${API_ENDPOINTS.INGEST}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-device-id': deviceId,
+            },
+            body: JSON.stringify(payload),
+          },
+          10_000,
+        );
+        if (res.ok) {
+          success = true;
+          console.log('[fg-location] HTTP fallback OK', res.status);
+        } else {
+          console.warn('[fg-location] HTTP fallback failed', res.status);
+          if (res.status === 404 && hasLocations) await clearBuffer();
+        }
+      } catch (err) {
+        console.warn('[fg-location] HTTP fallback error:', err instanceof Error ? err.message : String(err));
+      }
+    } else {
+      console.log('[fg-location] MQTT publish OK');
     }
+  } else {
+    // Background: fire-and-forget MQTT (QoS 0). Không await — client.publish()
+    // callback chỉ fire sau khi socket write hoàn tất, Android Doze throttle
+    // socket write → callback treo indefinitely → task bị block.
+    // Với heartbeat-only (hasLoc=false), đánh dấu success để cập nhật lastSent
+    // throttle. Với ingest (hasLoc=true), giữ buffer để foreground flush sau.
+    if (isMqttConnected()) {
+      publishTelemetry(deviceId, payload, 0).catch(() => {});
+    }
+    success = !hasLocations;
+    console.log(`[fg-location] background ${hasLocations ? 'ingest deferred (wait foreground)' : 'heartbeat fire-and-forget'}`);
   }
 
   if (!success) return;
@@ -450,13 +487,28 @@ async function postCommandResult(
 }
 
 /** Trả true nếu có command yêu cầu force flush buffer (vd request_location_now). */
+// AbortController.abort() không cancel được OkHttp trên Android background →
+// dùng Promise.race với timer. Fetch hung sẽ tiếp tục chạy ngầm nhưng task
+// không bị block.
+function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  ms: number,
+): Promise<Response> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('fetch timeout')), ms),
+  );
+  return Promise.race([fetch(url, options), timeout]);
+}
+
 async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.COMMANDS_POLL}`, {
-      method: 'POST',
-      headers: { 'x-device-id': deviceId },
-    });
+    res = await fetchWithTimeout(
+      `${API_BASE_URL}${API_ENDPOINTS.COMMANDS_POLL}`,
+      { method: 'POST', headers: { 'x-device-id': deviceId } },
+      5_000,
+    );
   } catch {
     return false;
   }
@@ -487,18 +539,21 @@ async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
  * không qua React tree. Hàm phải tồn tại trước `startLocationUpdatesAsync`.
  */
 TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
-  console.log('[fg-location] task fired', new Date().toISOString());
+  console.log('[fg-location] ── task fired ──', new Date().toISOString());
   if (error) {
     console.warn('[fg-location] task error:', error);
     return;
   }
   const deviceId = await loadStoredDeviceId();
-  if (!deviceId) return;
+  if (!deviceId) {
+    console.warn('[fg-location] no deviceId in storage, skip');
+    return;
+  }
 
   const payload = data as TaskData | undefined;
   const allLocs = payload?.locations ?? [];
+  console.log(`[fg-location] locations in payload: ${allLocs.length}, still=${isStill()}`);
 
-  // Cập nhật lastFixTime từ tất cả fix hợp lệ — FE dùng để đếm "GPS mất N phút".
   for (const loc of allLocs) {
     const acc = loc.coords.accuracy ?? null;
     if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) continue;
@@ -506,10 +561,6 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
     if (lastFixTime == null || ts > lastFixTime) lastFixTime = ts;
   }
 
-  // Chỉ append fix MỚI NHẤT vào buffer — distanceInterval=0 khiến OS batch
-  // tất cả fix tích lũy từ lần task trước vào payload.locations (có thể 10-30
-  // fix/lần). Foreground watcher đã bắt các fix cũ hơn rồi; lấy hết sẽ tạo
-  // hàng nghìn row/giờ dù thiết bị đứng yên.
   const latestLoc = allLocs[allLocs.length - 1];
   if (latestLoc) {
     const acc = latestLoc.coords.accuracy ?? null;
@@ -521,14 +572,23 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
         quality: classifyQuality(acc),
         timestamp: latestLoc.timestamp ?? Date.now(),
       }]);
+      console.log(`[fg-location] buffered fix lat=${latestLoc.coords.latitude.toFixed(5)} acc=${acc?.toFixed(0)}m`);
+    } else {
+      console.log(`[fg-location] fix dropped (accuracy ${acc?.toFixed(0)}m > ${MAX_ACCEPTABLE_ACCURACY_M}m)`);
     }
   }
 
-  // Poll command — request_location_now trả force=true để bypass movement gate.
-  const force = await pollAndExecuteCommands(deviceId);
-
-  // Unified send: tự branch ingest vs heartbeat dựa trên buffer + movement gate.
+  // Chỉ poll commands khi app đang foreground. Khi background, HTTP fetch
+  // đến localhost bị Android block/throttle, setTimeout cũng defer ~51s →
+  // task bị block suốt interval. Commands không quan trọng realtime khi
+  // background — chờ lần mở app tiếp theo.
+  console.log('[fg-location] calling pollAndExecuteCommands');
+  const force = isAppForeground
+    ? await pollAndExecuteCommands(deviceId)
+    : false;
+  console.log(`[fg-location] poll done force=${force}, calling sendTelemetry`);
   await sendTelemetry(deviceId, force);
+  console.log('[fg-location] sendTelemetry done');
 });
 
 /**

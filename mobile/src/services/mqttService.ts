@@ -57,13 +57,16 @@ export function isMqttConnected(): boolean {
 }
 
 /**
- * Publishes telemetry on `device/{deviceId}/telemetry` with QoS 1.
- * Resolves `true` when the broker ACKs, `false` when publish failed or
- * MQTT is not connected. Never rejects — callers fall back to HTTP.
+ * Publishes telemetry on `device/{deviceId}/telemetry`.
+ * - qos=1 (foreground): waits for broker PUBACK before resolving — guaranteed delivery.
+ * - qos=0 (background): resolves immediately after socket write — no PUBACK round-trip,
+ *   avoids hanging when Android Doze throttles network.
+ * Never rejects — callers fall back to HTTP.
  */
 export function publishTelemetry(
   deviceId: string,
   payload: IngestPayload,
+  qos: 0 | 1 = 1,
 ): Promise<boolean> {
   return new Promise((resolve) => {
     if (!client || !connected) {
@@ -73,7 +76,7 @@ export function publishTelemetry(
     client.publish(
       `device/${deviceId}/telemetry`,
       JSON.stringify(payload),
-      { qos: 1 },
+      { qos },
       (err) => resolve(!err),
     );
   });
