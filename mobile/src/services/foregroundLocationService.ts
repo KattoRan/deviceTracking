@@ -30,11 +30,13 @@ const MAX_ACCEPTABLE_ACCURACY_M = 200;
 const FLUSH_BATCH_LIMIT = 50;
 
 // H1 — Decouple sampling vs sending:
-// - OS wake task theo distanceInterval (25m) HOẶC timeInterval (30s).
+// - OS wake task theo LOCATION_TIME_INTERVAL_MS (10s) — đủ mượt khi di chuyển
+//   nhanh (xe máy ~30km/h: 10s = 83m gap, vẫn vẽ đường thấy được).
 // - /ingest gửi khi di chuyển đủ (movement gate accuracy-adjusted).
 // - /heartbeat chỉ gửi mỗi HEARTBEAT_MIN_INTERVAL_MS (30s MOVING, 60s STILL)
-//   để giữ last_seen refresh nhưng không spam khi đứng yên.
+//   để giữ last_seen refresh nhưng không spam khi đứng yên (3 task wake = 1 heartbeat).
 const MOVEMENT_THRESHOLD_M = 5;
+const LOCATION_TIME_INTERVAL_MS = 10_000;
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
 // H2 — Cell info cache: Telephony scan ~50-200ms mỗi lần, ở interval 5s
@@ -577,28 +579,33 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   const allLocs = payload?.locations ?? [];
   console.log(`[fg-location] locations in payload: ${allLocs.length}, still=${isStill()} lastFixTime=${lastFixTime}`);
 
+  // Buffer TẤT CẢ fix hợp lệ — Android có thể batch nhiều fix trong 1 task wake
+  // (Doze recover, deferredUpdatesInterval gộp). Trước đây chỉ giữ fix cuối →
+  // mất các điểm trung gian → history nhảy điểm khi di chuyển nhanh.
+  const toBuffer: LocationData[] = [];
+  let droppedAcc = 0;
   for (const loc of allLocs) {
     const acc = loc.coords.accuracy ?? null;
-    if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) continue;
+    if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) {
+      droppedAcc++;
+      continue;
+    }
     const ts = loc.timestamp ?? Date.now();
     if (lastFixTime == null || ts > lastFixTime) lastFixTime = ts;
+    toBuffer.push({
+      latitude: loc.coords.latitude,
+      longitude: loc.coords.longitude,
+      accuracy: acc ?? undefined,
+      quality: classifyQuality(acc),
+      timestamp: ts,
+    });
   }
-
-  const latestLoc = allLocs[allLocs.length - 1];
-  if (latestLoc) {
-    const acc = latestLoc.coords.accuracy ?? null;
-    if (acc == null || acc <= MAX_ACCEPTABLE_ACCURACY_M) {
-      await appendBuffer([{
-        latitude: latestLoc.coords.latitude,
-        longitude: latestLoc.coords.longitude,
-        accuracy: acc ?? undefined,
-        quality: classifyQuality(acc),
-        timestamp: latestLoc.timestamp ?? Date.now(),
-      }]);
-      console.log(`[fg-location] buffered fix lat=${latestLoc.coords.latitude.toFixed(5)} acc=${acc?.toFixed(0)}m`);
-    } else {
-      console.log(`[fg-location] fix dropped (accuracy ${acc?.toFixed(0)}m > ${MAX_ACCEPTABLE_ACCURACY_M}m)`);
-    }
+  if (toBuffer.length > 0) {
+    await appendBuffer(toBuffer);
+    const last = toBuffer[toBuffer.length - 1];
+    console.log(`[fg-location] buffered ${toBuffer.length} fix(es), latest lat=${last.latitude.toFixed(5)} acc=${last.accuracy?.toFixed(0)}m, dropped(acc)=${droppedAcc}`);
+  } else if (droppedAcc > 0) {
+    console.log(`[fg-location] all ${droppedAcc} fix(es) dropped (accuracy > ${MAX_ACCEPTABLE_ACCURACY_M}m)`);
   }
 
   // Chỉ poll commands khi app đang foreground. Khi background, HTTP fetch
@@ -648,9 +655,10 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
       // callback nếu >0 và device chưa di chuyển đủ. Heartbeat sẽ bị mất.
       // Coarse filter 25m được áp ở movement gate (app level) thay vì OS level.
       distanceInterval: 0,
-      // timeInterval=30s: wake task đều đặn → heartbeat khi still, flush khi moving.
-      timeInterval: HEARTBEAT_MIN_INTERVAL_MS,
-      deferredUpdatesInterval: HEARTBEAT_MIN_INTERVAL_MS,
+      // timeInterval=10s: wake task đều đặn → mượt khi di chuyển nhanh.
+      // Heartbeat throttle (30s/60s) ở app level, gate ingest spam.
+      timeInterval: LOCATION_TIME_INTERVAL_MS,
+      deferredUpdatesInterval: LOCATION_TIME_INTERVAL_MS,
       showsBackgroundLocationIndicator: true,
       foregroundService: {
         notificationTitle: '📍 Đang giám sát vị trí',
