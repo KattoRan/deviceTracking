@@ -4,6 +4,7 @@ import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
 import * as TaskManager from 'expo-task-manager';
 import { AppState, Vibration } from 'react-native';
+import NativeIngest from 'native-ingest';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
 import { getCellTowerInfo } from './cellInfoService';
@@ -289,15 +290,18 @@ async function prepareIngest(
 async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
   const ingest = await prepareIngest(force);
   const hasLocations = ingest !== null;
-  console.log(`[fg-location] sendTelemetry entered hasLoc=${hasLocations} force=${force}`);
+  console.log(`[fg-location] sendTelemetry entered hasLoc=${hasLocations} force=${force} fg=${isAppForeground}`);
 
   // Heartbeat-only path bị throttle để không spam khi tick admin = 5s.
   if (!hasLocations && !force) {
     const last = await getLastSent();
     const throttle = isStill() ? HEARTBEAT_STILL_MS : HEARTBEAT_MIN_INTERVAL_MS;
     const elapsed = last ? Date.now() - last.t : -1;
-    console.log(`[fg-location] heartbeat check elapsed=${elapsed}ms throttle=${throttle}ms`);
-    if (last && elapsed < throttle) return;
+    console.log(`[fg-location] heartbeat check elapsed=${elapsed}ms throttle=${throttle}ms lastSent=${last?.t ?? 'null'}`);
+    if (last && elapsed < throttle) {
+      console.log('[fg-location] heartbeat throttled — skip');
+      return;
+    }
   }
 
   const batteryLevel = await readBatteryLevel();
@@ -314,14 +318,15 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
   if (hasLocations) payload.locations = ingest!.toSend;
   if (lastFixTime != null) payload.lastFixAt = lastFixTime;
 
-  if (!isMqttConnected()) {
-    try { connectMqtt(deviceId); } catch { /* ignore */ }
-  }
-
   let success: boolean;
 
   if (isAppForeground) {
-    console.log(`[fg-location] sending via ${isMqttConnected() ? 'MQTT' : 'HTTP'} hasLoc=${hasLocations} force=${force}`);
+    const mqttUp = isMqttConnected();
+    if (!mqttUp) {
+      console.log('[fg-location] foreground: mqtt down, connecting...');
+      try { connectMqtt(deviceId); } catch { /* ignore */ }
+    }
+    console.log(`[fg-location] foreground: sending via ${isMqttConnected() ? 'MQTT' : 'HTTP'} hasLoc=${hasLocations}`);
     success = await publishTelemetry(deviceId, payload, 1);
     if (!success) {
       // HTTP fallback — chỉ trong foreground để tránh localhost fetch treo.
@@ -352,16 +357,34 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
       console.log('[fg-location] MQTT publish OK');
     }
   } else {
-    // Background: fire-and-forget MQTT (QoS 0). Không await — client.publish()
-    // callback chỉ fire sau khi socket write hoàn tất, Android Doze throttle
-    // socket write → callback treo indefinitely → task bị block.
-    // Với heartbeat-only (hasLoc=false), đánh dấu success để cập nhật lastSent
-    // throttle. Với ingest (hasLoc=true), giữ buffer để foreground flush sau.
-    if (isMqttConnected()) {
-      publishTelemetry(deviceId, payload, 0).catch(() => {});
+    // Background: dùng NativeIngest (HttpURLConnection chạy native thread).
+    // RN's OkHttp bridge và MQTT WebSocket đều bị treo trong headless task khi
+    // activity pause — Promise không bao giờ resolve. Native module bypass bridge,
+    // dùng standard Java SE network stack độc lập với RN runtime.
+    console.log(`[fg-location] background: NativeIngest hasLoc=${hasLocations}`);
+    if (NativeIngest) {
+      try {
+        const status = await NativeIngest.postJson(
+          `${API_BASE_URL}${API_ENDPOINTS.INGEST}`,
+          { 'Content-Type': 'application/json', 'x-device-id': deviceId },
+          JSON.stringify(payload),
+          8_000,
+        );
+        success = status >= 200 && status < 300;
+        console.log(`[fg-location] background NativeIngest -> ${status} ${success ? 'OK' : 'fail'}`);
+        if (status === 404 && hasLocations) await clearBuffer();
+      } catch (err) {
+        success = false;
+        console.warn('[fg-location] background NativeIngest error:', err instanceof Error ? err.message : String(err));
+      }
+    } else {
+      // Native module chưa link (vd quên rebuild) — fall back về MQTT
+      // fire-and-forget. Không async để task không treo.
+      const mqttUp = isMqttConnected();
+      console.warn('[fg-location] NativeIngest not linked, falling back to MQTT');
+      if (mqttUp) publishTelemetry(deviceId, payload, 0).catch(() => {});
+      success = !hasLocations;
     }
-    success = !hasLocations;
-    console.log(`[fg-location] background ${hasLocations ? 'ingest deferred (wait foreground)' : 'heartbeat fire-and-forget'}`);
   }
 
   if (!success) return;
@@ -539,7 +562,7 @@ async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
  * không qua React tree. Hàm phải tồn tại trước `startLocationUpdatesAsync`.
  */
 TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
-  console.log('[fg-location] ── task fired ──', new Date().toISOString());
+  console.log('[fg-location] ── task fired ──', new Date().toISOString(), `fg=${isAppForeground} mqtt=${isMqttConnected()}`);
   if (error) {
     console.warn('[fg-location] task error:', error);
     return;
@@ -552,7 +575,7 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
 
   const payload = data as TaskData | undefined;
   const allLocs = payload?.locations ?? [];
-  console.log(`[fg-location] locations in payload: ${allLocs.length}, still=${isStill()}`);
+  console.log(`[fg-location] locations in payload: ${allLocs.length}, still=${isStill()} lastFixTime=${lastFixTime}`);
 
   for (const loc of allLocs) {
     const acc = loc.coords.accuracy ?? null;

@@ -47,6 +47,13 @@ export const MQTT_CONFIG = {
     reconnectPeriod: 5_000,
     connectTimeout: 10_000,
     clean: true,
+    // keepalive=60: gửi PINGREQ mỗi 60s để giữ NAT entry sống (carrier NAT
+    // thường timeout kết nối idle sau ~2 phút). Nếu HiveMQ không nhận PINGREQ
+    // trong 90s (60×1.5) nó đóng conn → client nhận 'close' event → connected=false
+    // → reconnect tự động (reconnectPeriod=5s) → task kế tiếp thấy connected.
+    // keepalive=0 ngược lại không có heartbeat TCP → NAT drop silently →
+    // client tưởng còn connected → publish vào socket chết → message mất.
+    keepalive: 60,
   },
 } as const;
 

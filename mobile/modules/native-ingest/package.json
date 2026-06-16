@@ -1,0 +1,16 @@
+{
+  "name": "native-ingest",
+  "version": "0.1.0",
+  "description": "Native HTTP POST via HttpURLConnection — works in headless background tasks where RN's OkHttp bridge hangs",
+  "main": "index.ts",
+  "private": true,
+  "files": [
+    "index.ts",
+    "expo-module.config.json",
+    "android",
+    "ios"
+  ],
+  "expo": {
+    "platforms": ["android"]
+  }
+}

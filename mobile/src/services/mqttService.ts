@@ -25,22 +25,22 @@ function notify(value: boolean): void {
  * The clientId embeds `deviceId` so the broker can tell devices apart.
  */
 export function connectMqtt(deviceId: string): MqttClient {
-  if (client && connected) return client;
-  if (client) {
-    client.end(true);
-    client = null;
-  }
+  // Trả client hiện có nếu đã connected hoặc đang connecting (mqtt.js tự reconnect).
+  // Không kill client đang connecting — nhiều task handler gọi đồng thời sẽ tạo
+  // rapid connect/disconnect loop.
+  if (client) return client;
 
   client = mqtt.connect(MQTT_CONFIG.url, {
     clientId: `device-${deviceId}-${Math.random().toString(16).slice(2, 8)}`,
     clean: MQTT_CONFIG.options.clean,
     reconnectPeriod: MQTT_CONFIG.options.reconnectPeriod,
     connectTimeout: MQTT_CONFIG.options.connectTimeout,
+    keepalive: MQTT_CONFIG.options.keepalive,
   });
 
-  client.on('connect', () => notify(true));
-  client.on('close', () => notify(false));
-  client.on('error', () => notify(false));
+  client.on('connect', () => { console.log('[mqtt] connected'); notify(true); });
+  client.on('close', () => { console.log('[mqtt] disconnected'); notify(false); });
+  client.on('error', (e) => { console.warn('[mqtt] error:', e.message); notify(false); });
 
   return client;
 }
@@ -88,4 +88,30 @@ export function onMqttConnectionChange(cb: ConnectionListener): () => void {
   return () => {
     connectionListeners.delete(cb);
   };
+}
+
+/**
+ * Waits until MQTT is connected, or resolves false after `ms` milliseconds.
+ * Safe to call while already connected — resolves immediately.
+ */
+export function waitForMqttConnect(ms: number): Promise<boolean> {
+  if (connected) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let done = false;
+    const remove = onMqttConnectionChange((c) => {
+      if (c && !done) {
+        done = true;
+        remove();
+        clearTimeout(timer);
+        resolve(true);
+      }
+    });
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        remove();
+        resolve(false);
+      }
+    }, ms);
+  });
 }
