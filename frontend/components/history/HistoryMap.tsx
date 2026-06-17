@@ -13,36 +13,27 @@ import {
   Source,
   Layer,
 } from "react-map-gl/maplibre";
-import type {
-  Feature,
-  FeatureCollection,
-  LineString,
-  Point,
-  Polygon,
-} from "geojson";
+import type { FeatureCollection, LineString, Point } from "geojson";
 import type { MapLayerMouseEvent } from "maplibre-gl";
 import { GOONG_ATTRIBUTION, GOONG_STYLE_URL, hidePoiLayers } from "@/lib/mapTiles";
-import { metersCircle } from "@/lib/geoCircle";
 import type { HistoryPoint, LocationQuality } from "@/types/device";
 
 const HANOI_CENTER = { longitude: 105.8542, latitude: 21.0285, zoom: 12 };
-// Above this point count, drawing one marker per waypoint becomes a DOM
-// nightmare. MapLibre dùng GPU vẽ qua 1 layer nên đỡ hơn Leaflet rất nhiều
-// — vẫn giữ budget này để tooltip không bị spam khi user click.
 const WAYPOINT_BUDGET = 200;
 
-// Visual encoding của quality tier trên chấm waypoint. NULL coi như 'gps'
-// để dòng history persist trước migration vẫn render màu "đáng tin".
-const QUALITY_COLORS: Record<
-  "gps" | "approx" | "network",
-  { passed: string; pending: string; fillPending: string }
-> = {
-  gps: { passed: "#16a34a", pending: "#94a3b8", fillPending: "#cbd5e1" },
-  approx: { passed: "#f59e0b", pending: "#fbbf24", fillPending: "#fde68a" },
-  network: { passed: "#ef4444", pending: "#f87171", fillPending: "#fecaca" },
+// Tách segment khi khoảng cách thời gian giữa 2 điểm liên tiếp > 5 phút —
+// đủ dài để chắc chắn tracking bị tắt (mobile gửi heartbeat mỗi 30-60s,
+// gap > 5 phút = user pause/kill app rồi bật lại sau). Tránh nối "đường bay"
+// B→C khi user chuyển vùng giữa 2 lần bật theo dõi.
+const SEGMENT_GAP_MS = 5 * 60 * 1000;
+
+const QUALITY_COLORS: Record<"gps" | "approx" | "network", string> = {
+  gps: "#16a34a",
+  approx: "#f59e0b",
+  network: "#ef4444",
 };
 
-function colorsFor(quality: LocationQuality | null) {
+function colorFor(quality: LocationQuality | null): string {
   return QUALITY_COLORS[quality ?? "gps"];
 }
 
@@ -57,129 +48,109 @@ interface WaypointPopup {
   point: HistoryPoint;
 }
 
-interface HistoryMapProps {
+interface SegmentInfo {
   points: HistoryPoint[];
-  currentIndex: number;
-  isPlaying: boolean;
+  startGlobalIdx: number;
 }
 
-export default function HistoryMap({
-  points,
-  currentIndex,
-  isPlaying,
-}: HistoryMapProps) {
+/**
+ * Tách points thành các segment dựa trên gap thời gian. Mỗi segment vẽ
+ * riêng một LineString, không có đường nối giữa các segment.
+ */
+function splitIntoSegments(points: HistoryPoint[]): SegmentInfo[] {
+  if (points.length === 0) return [];
+  const segs: SegmentInfo[] = [{ points: [points[0]], startGlobalIdx: 0 }];
+  for (let i = 1; i < points.length; i++) {
+    const gap =
+      new Date(points[i].time).getTime() -
+      new Date(points[i - 1].time).getTime();
+    if (gap > SEGMENT_GAP_MS) {
+      segs.push({ points: [points[i]], startGlobalIdx: i });
+    } else {
+      segs[segs.length - 1].points.push(points[i]);
+    }
+  }
+  return segs;
+}
+
+interface HistoryMapProps {
+  points: HistoryPoint[];
+}
+
+interface EndpointPopup {
+  segmentIdx: number;
+  kind: "start" | "end";
+  point: HistoryPoint;
+}
+
+export default function HistoryMap({ points }: HistoryMapProps) {
   const mapRef = useRef<MapRef | null>(null);
   const fittedKeyRef = useRef<string | null>(null);
   const [waypointPopup, setWaypointPopup] = useState<WaypointPopup | null>(null);
-  const [endpointPopup, setEndpointPopup] = useState<"start" | "end" | null>(
-    null,
-  );
-  const [currentPopupOpen, setCurrentPopupOpen] = useState(false);
+  const [endpointPopup, setEndpointPopup] = useState<EndpointPopup | null>(null);
 
-  const currentPoint = points[currentIndex] ?? null;
+  const segments = useMemo(() => splitIntoSegments(points), [points]);
 
-  // ─── Tính trước GeoJSON ───
-  // Toàn route (xám)
-  const routeLine = useMemo<FeatureCollection<LineString>>(() => {
-    if (points.length < 2) return { type: "FeatureCollection", features: [] };
+  // GeoJSON: mỗi segment 1 LineString — MapLibre vẽ tách bạch, không nối qua
+  // gap. Dùng FeatureCollection với nhiều features hơn MultiLineString để
+  // dễ debug và mở rộng (vd: color theo segment sau này).
+  const routeLines = useMemo<FeatureCollection<LineString>>(() => {
     return {
       type: "FeatureCollection",
-      features: [
-        {
+      features: segments
+        .filter((s) => s.points.length >= 2)
+        .map((s, idx) => ({
           type: "Feature",
-          properties: {},
+          properties: { segmentIdx: idx },
           geometry: {
             type: "LineString",
-            coordinates: points.map((p) => [p.lon, p.lat]),
+            coordinates: s.points.map((p) => [p.lon, p.lat]),
           },
-        },
-      ],
+        })),
     };
-  }, [points]);
+  }, [segments]);
 
-  // Phần đã đi (xanh đậm)
-  const traveledLine = useMemo<FeatureCollection<LineString>>(() => {
-    if (currentIndex < 1) return { type: "FeatureCollection", features: [] };
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          properties: {},
-          geometry: {
-            type: "LineString",
-            coordinates: points
-              .slice(0, currentIndex + 1)
-              .map((p) => [p.lon, p.lat]),
-          },
-        },
-      ],
-    };
-  }, [points, currentIndex]);
-
-  // Lấy mẫu waypoint giữa đường (bỏ start/end)
+  // Lấy mẫu waypoint nội đoạn (bỏ start/end của mỗi segment vì đã có marker)
+  // để tổng số dots không vượt budget, tránh DOM nặng khi có hàng nghìn điểm.
   const sampledWaypoints = useMemo(() => {
-    if (points.length <= 2) return [] as Array<{ point: HistoryPoint; idx: number }>;
-    const step = Math.max(1, Math.ceil((points.length - 2) / WAYPOINT_BUDGET));
-    const out: Array<{ point: HistoryPoint; idx: number }> = [];
-    for (let i = 1; i < points.length - 1; i += step) {
-      out.push({ point: points[i], idx: i });
+    const internal: Array<{ point: HistoryPoint; idx: number }> = [];
+    for (const seg of segments) {
+      const len = seg.points.length;
+      if (len <= 2) continue;
+      // Phân bổ budget theo độ dài segment
+      const segBudget = Math.max(
+        1,
+        Math.floor((WAYPOINT_BUDGET * (len - 2)) / Math.max(1, points.length)),
+      );
+      const step = Math.max(1, Math.ceil((len - 2) / segBudget));
+      for (let i = 1; i < len - 1; i += step) {
+        internal.push({
+          point: seg.points[i],
+          idx: seg.startGlobalIdx + i,
+        });
+      }
     }
-    return out;
-  }, [points]);
+    return internal;
+  }, [segments, points.length]);
 
-  // Encode waypoint thành GeoJSON Point với thuộc tính passed/quality →
-  // MapLibre data-driven style sẽ chọn màu sắc, 1 layer vẽ tất cả qua GPU.
   const waypointFeatures = useMemo<FeatureCollection<Point>>(() => {
     return {
       type: "FeatureCollection",
-      features: sampledWaypoints.map(({ point: p, idx }) => {
-        const palette = colorsFor(p.quality);
-        const isPassed = idx <= currentIndex;
-        return {
-          type: "Feature",
-          geometry: {
-            type: "Point",
-            coordinates: [p.lon, p.lat],
-          },
-          properties: {
-            idx,
-            time: p.time,
-            quality: p.quality,
-            accuracy: p.accuracy,
-            color: isPassed ? palette.passed : palette.pending,
-            fillColor: isPassed ? palette.passed : palette.fillPending,
-            opacity: isPassed ? 0.9 : 0.6,
-          },
-        };
-      }),
+      features: sampledWaypoints.map(({ point: p, idx }) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+        properties: {
+          idx,
+          time: p.time,
+          quality: p.quality,
+          accuracy: p.accuracy,
+          color: colorFor(p.quality),
+        },
+      })),
     };
-  }, [sampledWaypoints, currentIndex]);
+  }, [sampledWaypoints]);
 
-  // Accuracy ring cho điểm hiện tại (chỉ vẽ khi quality khác gps)
-  const accuracyRing = useMemo<FeatureCollection<Polygon>>(() => {
-    if (
-      !currentPoint ||
-      !currentPoint.quality ||
-      currentPoint.quality === "gps" ||
-      currentPoint.accuracy == null ||
-      currentPoint.accuracy <= 0
-    ) {
-      return { type: "FeatureCollection", features: [] };
-    }
-    const palette = colorsFor(currentPoint.quality);
-    return {
-      type: "FeatureCollection",
-      features: [
-        metersCircle(currentPoint.lon, currentPoint.lat, currentPoint.accuracy, {
-          color: palette.passed,
-          fillColor: palette.fillPending,
-        }),
-      ] as Feature<Polygon>[],
-    };
-  }, [currentPoint]);
-
-  // ─── Fit bounds 1 lần cho mỗi route (chỉ key đầu/cuối/độ dài đổi mới fit) ───
+  // Fit bounds một lần cho mỗi route (key đổi mới re-fit).
   useEffect(() => {
     if (points.length === 0) {
       fittedKeyRef.current = null;
@@ -196,23 +167,11 @@ export default function HistoryMap({
         [Math.min(...lons), Math.min(...lats)],
         [Math.max(...lons), Math.max(...lats)],
       ],
-      { padding: 50, maxZoom: 16, duration: 600 },
+      { padding: 60, maxZoom: 16, duration: 600 },
     );
     fittedKeyRef.current = key;
   }, [points]);
 
-  // ─── Follow current point khi đang play ───
-  useEffect(() => {
-    if (!isPlaying || !currentPoint) return;
-    const map = mapRef.current?.getMap();
-    if (!map) return;
-    // setCenter (không animate) — playback 4x/8x gọi liên tục, animate sẽ
-    // queue và giật. setCenter là instant như Leaflet `setView({ animate:false })`.
-    map.setCenter([currentPoint.lon, currentPoint.lat]);
-    if (map.getZoom() < 15) map.setZoom(15);
-  }, [isPlaying, currentPoint]);
-
-  // ─── Click vào waypoint → popup ───
   const handleClick = useCallback((e: MapLayerMouseEvent) => {
     const hit = (e.features ?? []).find((f) => f.layer.id === "history-waypoints");
     if (hit && hit.geometry.type === "Point") {
@@ -234,7 +193,6 @@ export default function HistoryMap({
         },
       });
       setEndpointPopup(null);
-      setCurrentPopupOpen(false);
       return;
     }
     setWaypointPopup(null);
@@ -245,258 +203,190 @@ export default function HistoryMap({
     if (map) map.getCanvas().style.cursor = cursor;
   }, []);
 
-  const start = points[0] ?? null;
-  const end = points.length > 1 ? points[points.length - 1] : null;
-
   return (
-    <MapGL
-      ref={mapRef}
-      initialViewState={HANOI_CENTER}
-      mapStyle={GOONG_STYLE_URL}
-      style={{ width: "100%", height: "100%" }}
-      attributionControl={false}
-      onLoad={(e) => hidePoiLayers(e.target)}
-      onClick={handleClick}
-      onMouseEnter={() => setCursor("pointer")}
-      onMouseLeave={() => setCursor("")}
-      interactiveLayerIds={["history-waypoints"]}
-    >
-      <NavigationControl position="bottom-right" showCompass={false} />
-      <AttributionControl customAttribution={GOONG_ATTRIBUTION} compact />
+    <div className="relative h-full w-full">
+      <MapGL
+        ref={mapRef}
+        initialViewState={HANOI_CENTER}
+        mapStyle={GOONG_STYLE_URL}
+        style={{ width: "100%", height: "100%" }}
+        attributionControl={false}
+        onLoad={(e) => hidePoiLayers(e.target)}
+        onClick={handleClick}
+        onMouseEnter={() => setCursor("pointer")}
+        onMouseLeave={() => setCursor("")}
+        interactiveLayerIds={["history-waypoints"]}
+      >
+        <NavigationControl position="bottom-right" showCompass={false} />
+        <AttributionControl customAttribution={GOONG_ATTRIBUTION} compact />
 
-      {/* Toàn route — line dashed mờ */}
-      <Source id="history-route" type="geojson" data={routeLine}>
-        <Layer
-          id="history-route-line"
-          type="line"
-          paint={{
-            "line-color": "#94a3b8",
-            "line-width": 3,
-            "line-opacity": 0.55,
-            "line-dasharray": [8, 4],
-          }}
-        />
-      </Source>
-
-      {/* Phần đã đi — line đậm */}
-      <Source id="history-traveled" type="geojson" data={traveledLine}>
-        <Layer
-          id="history-traveled-line"
-          type="line"
-          paint={{
-            "line-color": "#16a34a",
-            "line-width": 4,
-            "line-opacity": 0.95,
-          }}
-        />
-      </Source>
-
-      {/* Accuracy ring (chỉ khi current là approx/network) */}
-      <Source id="history-accuracy" type="geojson" data={accuracyRing}>
-        <Layer
-          id="history-accuracy-fill"
-          type="fill"
-          paint={{
-            "fill-color": ["get", "fillColor"],
-            "fill-opacity": 0.18,
-          }}
-        />
-        <Layer
-          id="history-accuracy-line"
-          type="line"
-          paint={{
-            "line-color": ["get", "color"],
-            "line-width": 1,
-            "line-dasharray": [4, 4],
-          }}
-        />
-      </Source>
-
-      {/* Waypoint dots — 1 layer GPU render */}
-      <Source id="history-waypoints-src" type="geojson" data={waypointFeatures}>
-        <Layer
-          id="history-waypoints"
-          type="circle"
-          paint={{
-            "circle-radius": 3,
-            "circle-color": ["get", "fillColor"],
-            "circle-stroke-color": ["get", "color"],
-            "circle-stroke-width": 1,
-            "circle-opacity": ["get", "opacity"],
-          }}
-        />
-      </Source>
-
-      {/* Start point — chấm xanh dương */}
-      {start && (
-        <MapMarker
-          longitude={start.lon}
-          latitude={start.lat}
-          anchor="center"
-          onClick={(e) => {
-            e.originalEvent.stopPropagation();
-            setEndpointPopup("start");
-            setWaypointPopup(null);
-            setCurrentPopupOpen(false);
-          }}
-        >
-          <div
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: "50%",
-              background: "#3b82f6",
-              border: "2px solid #fff",
-              boxShadow: "0 2px 6px rgba(15,23,42,0.3)",
-              cursor: "pointer",
+        {/* Đường đi — mỗi segment một LineString, không nối qua gap */}
+        <Source id="history-routes" type="geojson" data={routeLines}>
+          <Layer
+            id="history-route-line"
+            type="line"
+            paint={{
+              "line-color": "#16a34a",
+              "line-width": 4,
+              "line-opacity": 0.9,
             }}
           />
-        </MapMarker>
-      )}
+        </Source>
 
-      {/* End point — chấm đỏ */}
-      {end && (
-        <MapMarker
-          longitude={end.lon}
-          latitude={end.lat}
-          anchor="center"
-          onClick={(e) => {
-            e.originalEvent.stopPropagation();
-            setEndpointPopup("end");
-            setWaypointPopup(null);
-            setCurrentPopupOpen(false);
-          }}
-        >
-          <div
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: "50%",
-              background: "#ef4444",
-              border: "2px solid #fff",
-              boxShadow: "0 2px 6px rgba(15,23,42,0.3)",
-              cursor: "pointer",
+        {/* Waypoint dots — màu theo quality */}
+        <Source id="history-waypoints-src" type="geojson" data={waypointFeatures}>
+          <Layer
+            id="history-waypoints"
+            type="circle"
+            paint={{
+              "circle-radius": 3,
+              "circle-color": ["get", "color"],
+              "circle-stroke-color": "#ffffff",
+              "circle-stroke-width": 1,
+              "circle-opacity": 0.9,
             }}
           />
-        </MapMarker>
-      )}
+        </Source>
 
-      {/* Current point — chấm xanh lá to với ring sáng */}
-      {currentPoint && (
-        <MapMarker
-          longitude={currentPoint.lon}
-          latitude={currentPoint.lat}
-          anchor="center"
-          onClick={(e) => {
-            e.originalEvent.stopPropagation();
-            setCurrentPopupOpen(true);
-            setEndpointPopup(null);
-            setWaypointPopup(null);
-          }}
-        >
-          <div
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              background: "#16a34a",
-              border: "3px solid #fff",
-              boxShadow:
-                "0 0 0 2px rgba(22,163,74,0.25), 0 2px 6px rgba(15,23,42,0.25)",
-              cursor: "pointer",
-            }}
-          />
-        </MapMarker>
-      )}
+        {/* Marker start/end cho TỪNG segment — gap giữa các segment lộ rõ
+            bằng cặp đỏ-xanh không có line nối */}
+        {segments.map((seg, segIdx) => {
+          if (seg.points.length === 0) return null;
+          const start = seg.points[0];
+          const end = seg.points.length > 1
+            ? seg.points[seg.points.length - 1]
+            : null;
+          return (
+            <div key={segIdx}>
+              <MapMarker
+                longitude={start.lon}
+                latitude={start.lat}
+                anchor="center"
+                onClick={(e) => {
+                  e.originalEvent.stopPropagation();
+                  setEndpointPopup({ segmentIdx: segIdx, kind: "start", point: start });
+                  setWaypointPopup(null);
+                }}
+              >
+                <div
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#3b82f6",
+                    border: "3px solid #fff",
+                    boxShadow: "0 2px 6px rgba(15,23,42,0.35)",
+                    cursor: "pointer",
+                  }}
+                  title={`Bắt đầu chặng ${segIdx + 1}`}
+                />
+              </MapMarker>
+              {end && (
+                <MapMarker
+                  longitude={end.lon}
+                  latitude={end.lat}
+                  anchor="center"
+                  onClick={(e) => {
+                    e.originalEvent.stopPropagation();
+                    setEndpointPopup({ segmentIdx: segIdx, kind: "end", point: end });
+                    setWaypointPopup(null);
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: "50%",
+                      background: "#ef4444",
+                      border: "3px solid #fff",
+                      boxShadow: "0 2px 6px rgba(15,23,42,0.35)",
+                      cursor: "pointer",
+                    }}
+                    title={`Kết thúc chặng ${segIdx + 1}`}
+                  />
+                </MapMarker>
+              )}
+            </div>
+          );
+        })}
 
-      {endpointPopup === "start" && start && (
-        <Popup
-          longitude={start.lon}
-          latitude={start.lat}
-          anchor="bottom"
-          offset={16}
-          closeOnClick={false}
-          onClose={() => setEndpointPopup(null)}
-        >
-          <div className="text-xs">
-            <strong>Xuất phát</strong>
-            <br />
-            {new Date(start.time).toLocaleString("vi-VN")}
-            <br />
-            {`${start.lat.toFixed(5)}, ${start.lon.toFixed(5)}`}
+        {endpointPopup && (
+          <Popup
+            longitude={endpointPopup.point.lon}
+            latitude={endpointPopup.point.lat}
+            anchor="bottom"
+            offset={18}
+            closeOnClick={false}
+            onClose={() => setEndpointPopup(null)}
+          >
+            <div className="text-xs">
+              <strong>
+                {endpointPopup.kind === "start" ? "Bắt đầu" : "Kết thúc"} chặng{" "}
+                {endpointPopup.segmentIdx + 1}
+              </strong>
+              <br />
+              {new Date(endpointPopup.point.time).toLocaleString("vi-VN")}
+              <br />
+              {`${endpointPopup.point.lat.toFixed(5)}, ${endpointPopup.point.lon.toFixed(5)}`}
+            </div>
+          </Popup>
+        )}
+
+        {waypointPopup && (
+          <Popup
+            longitude={waypointPopup.point.lon}
+            latitude={waypointPopup.point.lat}
+            anchor="bottom"
+            offset={10}
+            closeOnClick={false}
+            onClose={() => setWaypointPopup(null)}
+          >
+            <div className="text-xs">
+              #{waypointPopup.index + 1} —{" "}
+              {new Date(waypointPopup.point.time).toLocaleTimeString("vi-VN")}
+              <br />
+              {`${waypointPopup.point.lat.toFixed(5)}, ${waypointPopup.point.lon.toFixed(5)}`}
+              <br />
+              <span className="text-slate-500">
+                {qualityLabel(waypointPopup.point.quality)}
+                {waypointPopup.point.accuracy != null
+                  ? ` · ±${Math.round(waypointPopup.point.accuracy)}m`
+                  : ""}
+              </span>
+            </div>
+          </Popup>
+        )}
+      </MapGL>
+
+      {/* Legend — góc trên trái */}
+      {points.length > 0 && (
+        <div className="absolute left-3 top-3 z-10 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-md backdrop-blur">
+          <div className="mb-1.5 font-semibold text-slate-700">Chú thích</div>
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-block h-3 w-3 rounded-full border-2 border-white"
+              style={{ background: "#3b82f6", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
+            />
+            <span className="text-slate-600">Bắt đầu chặng</span>
           </div>
-        </Popup>
-      )}
-
-      {endpointPopup === "end" && end && (
-        <Popup
-          longitude={end.lon}
-          latitude={end.lat}
-          anchor="bottom"
-          offset={16}
-          closeOnClick={false}
-          onClose={() => setEndpointPopup(null)}
-        >
-          <div className="text-xs">
-            <strong>Kết thúc</strong>
-            <br />
-            {new Date(end.time).toLocaleString("vi-VN")}
-            <br />
-            {`${end.lat.toFixed(5)}, ${end.lon.toFixed(5)}`}
+          <div className="mt-1 flex items-center gap-2">
+            <span
+              className="inline-block h-3 w-3 rounded-full border-2 border-white"
+              style={{ background: "#ef4444", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
+            />
+            <span className="text-slate-600">Kết thúc chặng</span>
           </div>
-        </Popup>
-      )}
-
-      {currentPopupOpen && currentPoint && (
-        <Popup
-          longitude={currentPoint.lon}
-          latitude={currentPoint.lat}
-          anchor="bottom"
-          offset={22}
-          closeOnClick={false}
-          onClose={() => setCurrentPopupOpen(false)}
-        >
-          <div className="text-xs">
-            <strong>Vị trí hiện tại</strong>
-            <br />
-            {new Date(currentPoint.time).toLocaleString("vi-VN")}
-            <br />
-            {`${currentPoint.lat.toFixed(5)}, ${currentPoint.lon.toFixed(5)}`}
-            <br />
-            <span className="text-slate-500">
-              {qualityLabel(currentPoint.quality)}
-              {currentPoint.accuracy != null
-                ? ` · ±${Math.round(currentPoint.accuracy)}m`
-                : ""}
-            </span>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="inline-block h-1 w-5 rounded" style={{ background: "#16a34a" }} />
+            <span className="text-slate-600">Đường đi</span>
           </div>
-        </Popup>
+          {segments.length > 1 && (
+            <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-[10px] text-slate-500">
+              {segments.length} chặng (gap &gt; 5 phút bị tách)
+            </div>
+          )}
+        </div>
       )}
-
-      {waypointPopup && (
-        <Popup
-          longitude={waypointPopup.point.lon}
-          latitude={waypointPopup.point.lat}
-          anchor="bottom"
-          offset={10}
-          closeOnClick={false}
-          onClose={() => setWaypointPopup(null)}
-        >
-          <div className="text-xs">
-            #{waypointPopup.index + 1} —{" "}
-            {new Date(waypointPopup.point.time).toLocaleTimeString("vi-VN")}
-            <br />
-            {`${waypointPopup.point.lat.toFixed(5)}, ${waypointPopup.point.lon.toFixed(5)}`}
-            <br />
-            <span className="text-slate-500">
-              {qualityLabel(waypointPopup.point.quality)}
-              {waypointPopup.point.accuracy != null
-                ? ` · ±${Math.round(waypointPopup.point.accuracy)}m`
-                : ""}
-            </span>
-          </div>
-        </Popup>
-      )}
-    </MapGL>
+    </div>
   );
 }

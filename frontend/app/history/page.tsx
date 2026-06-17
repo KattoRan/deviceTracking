@@ -31,11 +31,6 @@ const HistoryMap = dynamic(() => import("@/components/history/HistoryMap"), {
   ),
 });
 
-const PlaybackControls = dynamic(
-  () => import("@/components/history/PlaybackControls"),
-  { ssr: false },
-);
-
 function toLocalDatetimeStr(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
@@ -87,10 +82,6 @@ function HistoryPageInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mapSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -121,29 +112,6 @@ function HistoryPageInner() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Playback timer — advance to the next point at `1000 / speed` ms.
-  useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    if (!isPlaying || !history || history.points.length === 0) return;
-
-    intervalRef.current = setInterval(() => {
-      setCurrentIndex((prev) => {
-        if (prev >= history.points.length - 1) {
-          setIsPlaying(false);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 1000 / speed);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [isPlaying, speed, history]);
-
   const handleSearch = useCallback(async () => {
     if (!selectedDeviceId) {
       setError("Vui lòng chọn thiết bị");
@@ -152,8 +120,6 @@ function HistoryPageInner() {
 
     setLoading(true);
     setError(null);
-    setIsPlaying(false);
-    setCurrentIndex(0);
 
     try {
       const data = await deviceService.getHistory(
@@ -441,24 +407,8 @@ function HistoryPageInner() {
           className="flex h-[calc(100vh-3.5rem)] scroll-mt-14 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
         >
           <div className="min-h-0 flex-1">
-            <HistoryMap
-              points={points}
-              currentIndex={currentIndex}
-              isPlaying={isPlaying}
-            />
+            <HistoryMap points={points} />
           </div>
-
-          {points.length > 0 && (
-            <PlaybackControls
-              points={points}
-              currentIndex={currentIndex}
-              setCurrentIndex={setCurrentIndex}
-              isPlaying={isPlaying}
-              setIsPlaying={setIsPlaying}
-              speed={speed}
-              setSpeed={setSpeed}
-            />
-          )}
         </div>
       </div>
     </div>
