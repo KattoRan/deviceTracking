@@ -7,7 +7,7 @@ import { AppState, Vibration } from 'react-native';
 import NativeIngest from 'native-ingest';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
-import { getCellTowerInfo } from './cellInfoService';
+import { getCellTowerInfo, getCellTowerInfoFresh } from './cellInfoService';
 import { connectMqtt, isMqttConnected, publishTelemetry } from './mqttService';
 
 export const FOREGROUND_LOCATION_TASK = 'foreground-location-task';
@@ -146,14 +146,26 @@ function isStill(): boolean {
   return variance < STILL_VARIANCE_THRESHOLD;
 }
 
+/**
+ * Trả cell info cho task hiện tại:
+ *   - STILL: dùng cache 15s + `getCellTowerInfo` (đọc OS framework cache, nhanh).
+ *     Đứng yên thì cell không đổi → cache hợp lý, đỡ tốn pin.
+ *   - MOVING: cache xuống 5s + `getCellTowerInfoFresh` (ép modem scan qua
+ *     `requestCellInfoUpdate`, Android 9+). Đảm bảo handover được phản ánh
+ *     ngay trên admin map, không phải đợi đến lúc dừng đèn đỏ mới update.
+ */
 async function getCachedCells(): Promise<
   Awaited<ReturnType<typeof getCellTowerInfo>>
 > {
-  if (cellCache && Date.now() - cellCache.ts < CELL_CACHE_TTL_MS) {
+  const still = isStill();
+  const ttl = still ? CELL_CACHE_TTL_MS : 5_000;
+  if (cellCache && Date.now() - cellCache.ts < ttl) {
     return cellCache.towers;
   }
   try {
-    const towers = await getCellTowerInfo();
+    const towers = still
+      ? await getCellTowerInfo()
+      : await getCellTowerInfoFresh();
     cellCache = { towers, ts: Date.now() };
     return towers;
   } catch {

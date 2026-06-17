@@ -22,7 +22,14 @@ export interface NativeCellInfo {
 }
 
 interface CellInfoNativeModule {
+  /** Đọc cell từ cache framework — nhanh nhưng có thể stale 30-60s khi handover. */
   getCellInfo(): Promise<NativeCellInfo[]>;
+  /**
+   * Ép modem scan tươi qua TelephonyManager.requestCellInfoUpdate (Android 9+).
+   * Callback 200-500ms, tốn pin nhiều hơn — chỉ dùng khi MOVING. API < 29
+   * fallback tự động về getCellInfo().
+   */
+  getCellInfoFresh(): Promise<NativeCellInfo[]>;
 }
 
 /**

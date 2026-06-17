@@ -125,6 +125,31 @@ export async function getCellTowerInfo(): Promise<CellTower[]> {
   }
 }
 
+/**
+ * Ép modem scan tươi qua TelephonyManager.requestCellInfoUpdate (Android 9+).
+ * Latency 200-500ms, tốn pin hơn `getCellTowerInfo()` — chỉ gọi khi MOVING
+ * để serving cell luôn fresh trên admin map khi đi xe nhanh. Đứng yên thì
+ * dùng `getCellTowerInfo()` (cache 15s) là đủ.
+ */
+export async function getCellTowerInfoFresh(): Promise<CellTower[]> {
+  const source = getCellInfoSource();
+
+  if (source === 'mock-expo-go') return MOCK_TOWERS;
+  if (source === 'unavailable') return [];
+
+  if (Platform.OS === 'android') {
+    const granted = await ensurePhoneStatePermission();
+    if (!granted) return [];
+  }
+
+  try {
+    const raw = await CellInfoModule!.getCellInfoFresh();
+    return raw.map(normalize).filter((c): c is CellTower => c !== null);
+  } catch {
+    return [];
+  }
+}
+
 export function isRealCellInfoAvailable(): boolean {
   return getCellInfoSource() === 'real';
 }

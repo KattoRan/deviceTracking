@@ -13,14 +13,23 @@ import android.telephony.CellIdentityNr
 import android.telephony.CellSignalStrengthNr
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CellInfoModule : Module() {
+  // Single executor cho TelephonyManager.requestCellInfoUpdate callback —
+  // tránh tạo thread mỗi lần gọi. Dùng cachedThreadPool để xử lý concurrent.
+  private val cellUpdateExecutor = Executors.newCachedThreadPool()
+
   override fun definition() = ModuleDefinition {
     Name("CellInfoModule")
 
+    // Đọc cell từ cache framework (nhanh, không tốn pin). Có thể stale 30-60s
+    // khi đang handover. Dùng cho heartbeat hoặc khi STILL.
     AsyncFunction("getCellInfo") getCellInfo@{
       val context = appContext.reactContext
         ?: throw Exceptions.ReactContextLost()
@@ -39,6 +48,66 @@ class CellInfoModule : Module() {
       }
 
       all.mapNotNull { info -> info.toMap() }
+    }
+
+    // Ép modem scan tươi qua requestCellInfoUpdate() (API 29+). Callback có
+    // thể mất 200-500ms. Pin tốn hơn → chỉ gọi khi MOVING. Fallback sang
+    // getAllCellInfo() trên API < 29 hoặc khi modem error.
+    AsyncFunction("getCellInfoFresh") { promise: Promise ->
+      val context = appContext.reactContext
+      if (context == null) {
+        promise.reject("NO_CONTEXT", "React context lost", null)
+        return@AsyncFunction
+      }
+
+      if (!hasRequiredPermissions(context)) {
+        promise.resolve(emptyList<Map<String, Any?>>())
+        return@AsyncFunction
+      }
+
+      val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+      if (tm == null) {
+        promise.resolve(emptyList<Map<String, Any?>>())
+        return@AsyncFunction
+      }
+
+      // API < 29 không có requestCellInfoUpdate — fallback luôn về cached.
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        val all = try { tm.allCellInfo ?: emptyList() } catch (_: SecurityException) { emptyList() }
+        promise.resolve(all.mapNotNull { it.toMap() })
+        return@AsyncFunction
+      }
+
+      // Callback có thể không fire trong môi trường không tốt → guard double-resolve.
+      val resolved = AtomicBoolean(false)
+      try {
+        tm.requestCellInfoUpdate(
+          cellUpdateExecutor,
+          object : TelephonyManager.CellInfoCallback() {
+            override fun onCellInfo(cellInfo: MutableList<CellInfo>) {
+              if (resolved.compareAndSet(false, true)) {
+                promise.resolve(cellInfo.mapNotNull { it.toMap() })
+              }
+            }
+
+            override fun onError(errorCode: Int, detail: Throwable?) {
+              // Fallback về cached khi modem từ chối refresh.
+              if (resolved.compareAndSet(false, true)) {
+                val all = try { tm.allCellInfo ?: emptyList() } catch (_: SecurityException) { emptyList() }
+                promise.resolve(all.mapNotNull { it.toMap() })
+              }
+            }
+          },
+        )
+      } catch (e: SecurityException) {
+        if (resolved.compareAndSet(false, true)) {
+          promise.resolve(emptyList<Map<String, Any?>>())
+        }
+      } catch (e: Exception) {
+        if (resolved.compareAndSet(false, true)) {
+          promise.reject("CELL_INFO_FRESH_ERROR", e.message ?: "unknown", e)
+        }
+      }
     }
   }
 
