@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsBoolean,
   IsIn,
   IsInt,
   IsObject,
@@ -14,7 +13,6 @@ import {
 export const COMMANDS = [
   'request_location_now',
   'ring_alarm',
-  'toggle_tracking',
   'lock_device',
 ] as const;
 
@@ -34,12 +32,6 @@ export class RingAlarmPayloadDto {
   @Min(0)
   @Max(100)
   volume?: number;
-}
-
-export class ToggleTrackingPayloadDto {
-  @ApiProperty()
-  @IsBoolean()
-  enabled: boolean;
 }
 
 export class LockDevicePayloadDto {

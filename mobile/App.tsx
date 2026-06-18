@@ -123,9 +123,9 @@ function AppContent() {
 
   // Global handler — ring_alarm must work regardless of which screen the
   // user is on, so it lives here at the app root. TrackingScreen handles
-  // request_location_now and toggle_tracking since those depend on its
-  // local tracking state. lock_device is now managed via the persistent
-  // is_locked field and the device_lock_changed socket event above.
+  // request_location_now since nó depend on local tracking state.
+  // lock_device managed via persistent is_locked field + device_lock_changed
+  // socket event above.
   useEffect(() => {
     if (registrationStatus !== 'registered') return;
     return onCommand((event: CommandDispatchEvent) => {

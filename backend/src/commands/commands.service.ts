@@ -17,7 +17,6 @@ import {
   CreateCommandDto,
   LockDevicePayloadDto,
   RingAlarmPayloadDto,
-  ToggleTrackingPayloadDto,
 } from './dto/create-command.dto';
 import { ListCommandsQueryDto } from './dto/list-commands.dto';
 
@@ -28,7 +27,6 @@ type PayloadClass = new () => object;
 const PAYLOAD_VALIDATORS: Record<CommandName, PayloadClass | null> = {
   request_location_now: null,
   ring_alarm: RingAlarmPayloadDto,
-  toggle_tracking: ToggleTrackingPayloadDto,
   lock_device: LockDevicePayloadDto,
 };
 

@@ -475,19 +475,6 @@ async function executeCommandHeadless(
         // không render được overlay, chỉ ack.
         return { success: true };
 
-      case 'toggle_tracking': {
-        const enabled = !!cmd.payload?.enabled;
-        if (!enabled) {
-          await stopForegroundLocation();
-          return { success: true };
-        }
-        return {
-          success: false,
-          error:
-            'Không thể bật tracking từ background. Cần mở app trên thiết bị.',
-        };
-      }
-
       default:
         return { success: false, error: `Unknown command: ${cmd.command}` };
     }

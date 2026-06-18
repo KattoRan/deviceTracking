@@ -53,7 +53,6 @@ const STATUS_COLOR: Record<CommandStatus, string> = {
 const COMMAND_LABEL: Record<CommandName, string> = {
   request_location_now: "Cập nhật vị trí ngay",
   ring_alarm: "Kêu chuông",
-  toggle_tracking: "Bật/tắt tracking",
   lock_device: "Khóa thiết bị",
 };
 

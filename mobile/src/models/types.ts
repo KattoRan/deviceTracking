@@ -102,7 +102,6 @@ export interface IngestResponse {
 export type CommandName =
   | 'request_location_now'
   | 'ring_alarm'
-  | 'toggle_tracking'
   | 'lock_device';
 
 export interface CommandDispatchEvent {

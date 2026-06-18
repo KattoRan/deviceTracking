@@ -8,8 +8,7 @@ interface LockOverlayProps {
 /**
  * Full-screen opaque modal that blocks all interaction. Presented when the
  * server sends `lock_device`. It intentionally has no dismiss button — the
- * only way out in this demo is a server-side command that clears it
- * (e.g. a later `toggle_tracking` or an app restart in a real product).
+ * only way out là admin unlock từ web (event `device_lock_changed`).
  */
 export default function LockOverlay({ visible, message }: LockOverlayProps) {
   return (

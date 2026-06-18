@@ -301,9 +301,9 @@ export default function TrackingScreen() {
     return () => clearTimeout(t);
   }, [sosResult]);
 
-  // Tracking-specific commands (request_location_now, toggle_tracking).
-  // ring_alarm and lock_device are handled globally in App.tsx so they
-  // still work when the user is on a different screen.
+  // Tracking-specific commands (request_location_now). ring_alarm and
+  // lock_device are handled globally in App.tsx so they still work khi user
+  // ở screen khác.
   useEffect(() => {
     if (!storedData?.deviceId) return;
     return onCommand(async (event: CommandDispatchEvent) => {
@@ -323,35 +323,9 @@ export default function TrackingScreen() {
             error: 'Không lấy được vị trí',
           });
         }
-      } else if (event.command === 'toggle_tracking') {
-        ackCommand(event.commandId);
-        const enabled = !!event.payload?.enabled;
-        try {
-          if (enabled && !isActiveRef.current) {
-            const ok = await startTracking();
-            sendCommandResult({
-              commandId: event.commandId,
-              success: ok,
-              error: ok ? null : 'Không bật được tracking',
-            });
-          } else if (!enabled && isActiveRef.current) {
-            stopTracking();
-            sendCommandResult({ commandId: event.commandId, success: true });
-          } else {
-            // no-op but still a success — the device is already in the
-            // requested state.
-            sendCommandResult({ commandId: event.commandId, success: true });
-          }
-        } catch (err) {
-          sendCommandResult({
-            commandId: event.commandId,
-            success: false,
-            error: err instanceof Error ? err.message : 'failed',
-          });
-        }
       }
     });
-  }, [storedData, sendTelemetry, startTracking, stopTracking]);
+  }, [storedData, sendTelemetry]);
 
   useFocusEffect(
     useCallback(() => {
