@@ -65,15 +65,15 @@ export class DevicesService {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
       select: {
-        parent_account: {
+        manager_account: {
           select: { display_name: true, phone_number: true },
         },
       },
     });
     if (!device) throw new NotFoundException('Device not found');
     return {
-      displayName: device.parent_account.display_name,
-      phoneNumber: device.parent_account.phone_number,
+      displayName: device.manager_account.display_name,
+      phoneNumber: device.manager_account.phone_number,
     };
   }
 
@@ -88,10 +88,10 @@ export class DevicesService {
 
   async setLockStatus(
     deviceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     locked: boolean,
   ): Promise<{ locked: boolean }> {
-    await this.assertOwnership(deviceId, parentAccountId);
+    await this.assertOwnership(deviceId, managerAccountId);
 
     await this.prisma.devices.update({
       where: { id: deviceId },
@@ -105,12 +105,12 @@ export class DevicesService {
 
   /**
    * Mobile-side pairing: nhập pairingCode + thông tin người được giám sát →
-   * tạo Device dưới ParentAccount tương ứng. Phone optional (1 phụ huynh có
+   * tạo Device dưới ManagerAccount tương ứng. Phone optional (1 phụ huynh có
    * thể pair nhiều thiết bị cùng số máy nếu cùng family plan).
    */
   async pair(dto: PairDeviceDto): Promise<PairDeviceResponseDto> {
     const code = normalizePairingCode(dto.pairingCode);
-    const parent = await this.prisma.parent_accounts.findUnique({
+    const parent = await this.prisma.manager_accounts.findUnique({
       where: { pairing_code: code },
       select: { id: true },
     });
@@ -120,28 +120,28 @@ export class DevicesService {
 
     const device = await this.prisma.devices.create({
       data: {
-        parent_account_id: parent.id,
-        person_name: dto.personName.trim(),
+        manager_account_id: parent.id,
+        owner_name: dto.ownerName.trim(),
         phone_number: dto.phoneNumber?.trim() || null,
         model: dto.device?.model?.trim() || null,
         type: dto.device?.type?.trim() || null,
         device_os: dto.device?.os?.trim() || null,
       },
-      select: { id: true, person_name: true },
+      select: { id: true, owner_name: true },
     });
 
     this.logger.log(
-      `Paired device=${device.id} (${device.person_name}) to parent=${parent.id}`,
+      `Paired device=${device.id} (${device.owner_name}) to parent=${parent.id}`,
     );
     return {
       deviceId: device.id,
-      personName: device.person_name,
+      ownerName: device.owner_name,
     };
   }
 
-  async findAll(parentAccountId: string) {
+  async findAll(managerAccountId: string) {
     const devices = await this.prisma.devices.findMany({
-      where: { parent_account_id: parentAccountId },
+      where: { manager_account_id: managerAccountId },
       orderBy: { registered_at: 'desc' },
     });
 
@@ -183,8 +183,8 @@ export class DevicesService {
       const loc = locMap.get(d.id);
       return {
         id: d.id,
-        name: d.person_name,
-        person_name: d.person_name,
+        name: d.owner_name,
+        owner_name: d.owner_name,
         phone_number: d.phone_number,
         model: d.model,
         device_os: d.device_os,
@@ -202,7 +202,7 @@ export class DevicesService {
 
   async getLocationHistory(
     deviceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     from?: string,
     to?: string,
     minDistanceMeters?: number,
@@ -212,7 +212,7 @@ export class DevicesService {
       where: { id: deviceId },
     });
     if (!device) throw new NotFoundException('Device not found');
-    if (device.parent_account_id !== parentAccountId) {
+    if (device.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với thiết bị này');
     }
 
@@ -296,8 +296,8 @@ export class DevicesService {
     return {
       device: {
         id: device.id,
-        name: device.person_name,
-        person_name: device.person_name,
+        name: device.owner_name,
+        owner_name: device.owner_name,
         phone_number: device.phone_number,
       },
       from: fromDate.toISOString(),
@@ -310,8 +310,8 @@ export class DevicesService {
     };
   }
 
-  async remove(id: string, parentAccountId: string): Promise<void> {
-    await this.assertOwnership(id, parentAccountId);
+  async remove(id: string, managerAccountId: string): Promise<void> {
+    await this.assertOwnership(id, managerAccountId);
 
     // location_history, cell_tower_history, sos_events, device_geofences,
     // commands all cascade via ON DELETE CASCADE.
@@ -321,10 +321,10 @@ export class DevicesService {
     // the Pairing screen) and any dashboards listening for list refreshes.
     this.events.emitDeviceDeleted({ deviceId: id });
 
-    this.logger.log(`Deleted device=${id} (parent=${parentAccountId})`);
+    this.logger.log(`Deleted device=${id} (parent=${managerAccountId})`);
   }
 
-  async findOne(id: string, parentAccountId: string) {
+  async findOne(id: string, managerAccountId: string) {
     const device = await this.prisma.devices.findUnique({
       where: { id },
       include: {
@@ -334,7 +334,7 @@ export class DevicesService {
       },
     });
     if (!device) throw new NotFoundException('Device not found');
-    if (device.parent_account_id !== parentAccountId) {
+    if (device.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với thiết bị này');
     }
 
@@ -399,7 +399,7 @@ export class DevicesService {
 
     return {
       id: device.id,
-      person_name: device.person_name,
+      owner_name: device.owner_name,
       phone_number: device.phone_number,
       model: device.model,
       device_os: device.device_os,
@@ -451,14 +451,14 @@ export class DevicesService {
 
   private async assertOwnership(
     deviceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
   ): Promise<void> {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      select: { parent_account_id: true },
+      select: { manager_account_id: true },
     });
     if (!device) throw new NotFoundException('Device not found');
-    if (device.parent_account_id !== parentAccountId) {
+    if (device.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với thiết bị này');
     }
   }

@@ -3,7 +3,7 @@ import { apiClient } from "@/lib/api";
 export interface SosEvent {
   id: string;
   deviceId: string;
-  personName: string;
+  ownerName: string;
   lat: number;
   lon: number;
   accuracy: number | null;

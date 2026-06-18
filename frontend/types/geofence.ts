@@ -13,7 +13,7 @@ export interface GeofenceDetail extends GeofenceListItem {
   devices: Array<{
     id: string;
     name: string;
-    person_name: string;
+    owner_name: string;
     phone_number: string | null;
   }>;
 }

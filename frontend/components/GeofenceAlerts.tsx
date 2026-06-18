@@ -491,7 +491,7 @@ function sosEventToItem(e: SosEvent): SosAlertItem {
   return {
     sosEventId: e.id,
     deviceId: e.deviceId,
-    deviceName: e.personName,
+    deviceName: e.ownerName,
     lat: e.lat,
     lon: e.lon,
     batteryLevel: e.batteryLevel,

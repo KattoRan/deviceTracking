@@ -1,4 +1,4 @@
-export interface ParentAccount {
+export interface ManagerAccount {
   id: string;
   email: string;
   displayName: string | null;
@@ -24,5 +24,5 @@ export interface UpdateProfileInput {
 
 export interface LoginResponse {
   token: string;
-  parentAccount: ParentAccount;
+  managerAccount: ManagerAccount;
 }

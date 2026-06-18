@@ -29,7 +29,7 @@ export interface GeofenceDetail extends GeofenceListItem {
   devices: Array<{
     id: string;
     name: string;
-    person_name: string;
+    owner_name: string;
     phone_number: string | null;
   }>;
 }
@@ -61,12 +61,12 @@ export class GeofencesService {
   ) {}
 
   async create(
-    parentAccountId: string,
+    managerAccountId: string,
     dto: CreateGeofenceDto,
   ): Promise<GeofenceDetail> {
     const created = await this.prisma.geofences.create({
       data: {
-        parent_account_id: parentAccountId,
+        manager_account_id: managerAccountId,
         name: dto.name.trim(),
         lat: dto.lat,
         lon: dto.lon,
@@ -74,14 +74,14 @@ export class GeofencesService {
       },
     });
     this.logger.log(
-      `Created geofence ${created.id} (${created.name}) parent=${parentAccountId}`,
+      `Created geofence ${created.id} (${created.name}) parent=${managerAccountId}`,
     );
-    return this.toDetail(created.id, parentAccountId);
+    return this.toDetail(created.id, managerAccountId);
   }
 
-  async findAll(parentAccountId: string): Promise<GeofenceListItem[]> {
+  async findAll(managerAccountId: string): Promise<GeofenceListItem[]> {
     const rows = await this.prisma.geofences.findMany({
-      where: { parent_account_id: parentAccountId },
+      where: { manager_account_id: managerAccountId },
       orderBy: { created_at: 'desc' },
       include: { _count: { select: { device_geofences: true } } },
     });
@@ -97,13 +97,13 @@ export class GeofencesService {
     }));
   }
 
-  async findOne(id: string, parentAccountId: string): Promise<GeofenceDetail> {
-    return this.toDetail(id, parentAccountId);
+  async findOne(id: string, managerAccountId: string): Promise<GeofenceDetail> {
+    return this.toDetail(id, managerAccountId);
   }
 
   async update(
     id: string,
-    parentAccountId: string,
+    managerAccountId: string,
     dto: UpdateGeofenceDto,
   ): Promise<GeofenceDetail> {
     const existing = await this.prisma.geofences.findUnique({
@@ -111,7 +111,7 @@ export class GeofencesService {
       include: { device_geofences: { select: { device_id: true } } },
     });
     if (!existing) throw new NotFoundException('Geofence not found');
-    if (existing.parent_account_id !== parentAccountId) {
+    if (existing.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
 
@@ -141,16 +141,16 @@ export class GeofencesService {
       );
     }
 
-    return this.toDetail(id, parentAccountId);
+    return this.toDetail(id, managerAccountId);
   }
 
-  async remove(id: string, parentAccountId: string): Promise<void> {
+  async remove(id: string, managerAccountId: string): Promise<void> {
     const existing = await this.prisma.geofences.findUnique({
       where: { id },
       include: { device_geofences: { select: { device_id: true } } },
     });
     if (!existing) throw new NotFoundException('Geofence not found');
-    if (existing.parent_account_id !== parentAccountId) {
+    if (existing.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
 
@@ -176,17 +176,17 @@ export class GeofencesService {
 
   async assignDevice(
     geofenceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     deviceId: string,
   ): Promise<GeofenceDetail> {
     const [zone, device, existing] = await Promise.all([
       this.prisma.geofences.findUnique({
         where: { id: geofenceId },
-        select: { id: true, parent_account_id: true },
+        select: { id: true, manager_account_id: true },
       }),
       this.prisma.devices.findUnique({
         where: { id: deviceId },
-        select: { id: true, parent_account_id: true },
+        select: { id: true, manager_account_id: true },
       }),
       this.prisma.device_geofences.findUnique({
         where: {
@@ -198,11 +198,11 @@ export class GeofencesService {
       }),
     ]);
     if (!zone) throw new NotFoundException('Geofence not found');
-    if (zone.parent_account_id !== parentAccountId) {
+    if (zone.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
     if (!device) throw new NotFoundException('Device not found');
-    if (device.parent_account_id !== parentAccountId) {
+    if (device.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với thiết bị này');
     }
     if (existing) {
@@ -215,12 +215,12 @@ export class GeofencesService {
 
     await this.reEvaluateDevice(deviceId);
 
-    return this.toDetail(geofenceId, parentAccountId);
+    return this.toDetail(geofenceId, managerAccountId);
   }
 
   async setDevices(
     geofenceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     deviceIds: string[],
   ): Promise<GeofenceDetail> {
     const zone = await this.prisma.geofences.findUnique({
@@ -228,19 +228,19 @@ export class GeofencesService {
       include: { device_geofences: { select: { device_id: true } } },
     });
     if (!zone) throw new NotFoundException('Geofence not found');
-    if (zone.parent_account_id !== parentAccountId) {
+    if (zone.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
 
     if (deviceIds.length > 0) {
       const devices = await this.prisma.devices.findMany({
         where: { id: { in: deviceIds } },
-        select: { id: true, parent_account_id: true },
+        select: { id: true, manager_account_id: true },
       });
       for (const id of deviceIds) {
         const d = devices.find((x) => x.id === id);
         if (!d) throw new NotFoundException(`Device ${id} not found`);
-        if (d.parent_account_id !== parentAccountId) {
+        if (d.manager_account_id !== managerAccountId) {
           throw new ForbiddenException(`Không có quyền với thiết bị ${id}`);
         }
       }
@@ -275,11 +275,11 @@ export class GeofencesService {
       [...toAdd, ...toRemove].map((id) => this.reEvaluateDevice(id)),
     );
 
-    return this.toDetail(geofenceId, parentAccountId);
+    return this.toDetail(geofenceId, managerAccountId);
   }
 
   async listActiveBreaches(
-    parentAccountId: string,
+    managerAccountId: string,
   ): Promise<GeofenceBreachEvent[]> {
     const all = await this.state.listActiveBreaches();
     if (all.length === 0) return [];
@@ -290,7 +290,7 @@ export class GeofencesService {
     const ownedDeviceIds = new Set(
       (
         await this.prisma.devices.findMany({
-          where: { parent_account_id: parentAccountId },
+          where: { manager_account_id: managerAccountId },
           select: { id: true },
         })
       ).map((d) => d.id),
@@ -300,13 +300,13 @@ export class GeofencesService {
 
   async detachDevice(
     geofenceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     deviceId: string,
   ): Promise<GeofenceDetail> {
     const [zone, link] = await Promise.all([
       this.prisma.geofences.findUnique({
         where: { id: geofenceId },
-        select: { parent_account_id: true },
+        select: { manager_account_id: true },
       }),
       this.prisma.device_geofences.findUnique({
         where: {
@@ -318,7 +318,7 @@ export class GeofencesService {
       }),
     ]);
     if (!zone) throw new NotFoundException('Geofence not found');
-    if (zone.parent_account_id !== parentAccountId) {
+    if (zone.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
     if (!link) throw new NotFoundException('Thiết bị không thuộc vùng này');
@@ -333,7 +333,7 @@ export class GeofencesService {
     });
     await this.reEvaluateDevice(deviceId);
 
-    return this.toDetail(geofenceId, parentAccountId);
+    return this.toDetail(geofenceId, managerAccountId);
   }
 
   /**
@@ -345,7 +345,7 @@ export class GeofencesService {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
       select: {
-        person_name: true,
+        owner_name: true,
         device_geofences: {
           include: {
             geofence: {
@@ -431,7 +431,7 @@ export class GeofencesService {
 
     const event: GeofenceBreachEvent = {
       deviceId,
-      deviceName: device.person_name ?? null,
+      deviceName: device.owner_name ?? null,
       geofenceId: nearest.id,
       geofenceName: nearest.name,
       status: current === 'outside' ? 'outside' : 'returned',
@@ -461,7 +461,7 @@ export class GeofencesService {
 
   private async toDetail(
     id: string,
-    parentAccountId: string,
+    managerAccountId: string,
   ): Promise<GeofenceDetail> {
     const row = await this.prisma.geofences.findUnique({
       where: { id },
@@ -471,7 +471,7 @@ export class GeofencesService {
             device: {
               select: {
                 id: true,
-                person_name: true,
+                owner_name: true,
                 phone_number: true,
               },
             },
@@ -480,7 +480,7 @@ export class GeofencesService {
       },
     });
     if (!row) throw new NotFoundException('Geofence not found');
-    if (row.parent_account_id !== parentAccountId) {
+    if (row.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với vùng này');
     }
     return {
@@ -494,8 +494,8 @@ export class GeofencesService {
       updated_at: row.updated_at,
       devices: row.device_geofences.map((dg) => ({
         id: dg.device.id,
-        name: dg.device.person_name,
-        person_name: dg.device.person_name,
+        name: dg.device.owner_name,
+        owner_name: dg.device.owner_name,
         phone_number: dg.device.phone_number,
       })),
     };

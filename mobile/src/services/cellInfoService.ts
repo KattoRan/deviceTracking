@@ -149,15 +149,3 @@ export async function getCellTowerInfoFresh(): Promise<CellTower[]> {
     return [];
   }
 }
-
-export function isRealCellInfoAvailable(): boolean {
-  return getCellInfoSource() === 'real';
-}
-
-export function isUsingMockCellInfo(): boolean {
-  return getCellInfoSource() === 'mock-expo-go';
-}
-
-export function isCellInfoUnavailable(): boolean {
-  return getCellInfoSource() === 'unavailable';
-}

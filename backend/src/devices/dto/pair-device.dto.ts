@@ -36,7 +36,7 @@ export class PairDeviceDto {
   @IsString()
   @IsNotEmpty({ message: 'Tên người được giám sát không được để trống' })
   @MinLength(1)
-  personName: string;
+  ownerName: string;
 
   @ApiPropertyOptional({ example: '0987654321' })
   @IsOptional()
@@ -57,5 +57,5 @@ export class PairDeviceResponseDto {
   deviceId: string;
 
   @ApiProperty({ example: 'Nguyễn Văn A' })
-  personName: string;
+  ownerName: string;
 }

@@ -2,22 +2,8 @@ import mqtt, { type MqttClient } from 'mqtt';
 import { MQTT_CONFIG } from '../config/api';
 import type { IngestPayload } from '../models/types';
 
-type ConnectionListener = (connected: boolean) => void;
-
 let client: MqttClient | null = null;
 let connected = false;
-const connectionListeners = new Set<ConnectionListener>();
-
-function notify(value: boolean): void {
-  connected = value;
-  for (const cb of connectionListeners) {
-    try {
-      cb(value);
-    } catch {
-      // listeners must not throw
-    }
-  }
-}
 
 /**
  * Connects to the Mosquitto broker over WebSocket (default port 9001).
@@ -38,9 +24,9 @@ export function connectMqtt(deviceId: string): MqttClient {
     keepalive: MQTT_CONFIG.options.keepalive,
   });
 
-  client.on('connect', () => { console.log('[mqtt] connected'); notify(true); });
-  client.on('close', () => { console.log('[mqtt] disconnected'); notify(false); });
-  client.on('error', (e) => { console.warn('[mqtt] error:', e.message); notify(false); });
+  client.on('connect', () => { console.log('[mqtt] connected'); connected = true; });
+  client.on('close', () => { console.log('[mqtt] disconnected'); connected = false; });
+  client.on('error', (e) => { console.warn('[mqtt] error:', e.message); connected = false; });
 
   return client;
 }
@@ -49,7 +35,7 @@ export function disconnectMqtt(): void {
   if (!client) return;
   client.end(true);
   client = null;
-  notify(false);
+  connected = false;
 }
 
 export function isMqttConnected(): boolean {
@@ -79,39 +65,5 @@ export function publishTelemetry(
       { qos },
       (err) => resolve(!err),
     );
-  });
-}
-
-export function onMqttConnectionChange(cb: ConnectionListener): () => void {
-  connectionListeners.add(cb);
-  cb(connected);
-  return () => {
-    connectionListeners.delete(cb);
-  };
-}
-
-/**
- * Waits until MQTT is connected, or resolves false after `ms` milliseconds.
- * Safe to call while already connected — resolves immediately.
- */
-export function waitForMqttConnect(ms: number): Promise<boolean> {
-  if (connected) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let done = false;
-    const remove = onMqttConnectionChange((c) => {
-      if (c && !done) {
-        done = true;
-        remove();
-        clearTimeout(timer);
-        resolve(true);
-      }
-    });
-    const timer = setTimeout(() => {
-      if (!done) {
-        done = true;
-        remove();
-        resolve(false);
-      }
-    }, ms);
   });
 }

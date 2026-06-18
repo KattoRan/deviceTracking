@@ -2,12 +2,10 @@ import { apiClient, AUTH_TOKEN_KEY } from "@/lib/api";
 import type {
   LoginInput,
   LoginResponse,
-  ParentAccount,
+  ManagerAccount,
   RegisterInput,
   UpdateProfileInput,
 } from "@/types/admin";
-
-export { AUTH_TOKEN_KEY };
 
 export const tokenStorage = {
   get(): string | null {
@@ -41,13 +39,13 @@ export const authService = {
     return data;
   },
 
-  me: async (): Promise<ParentAccount> => {
-    const { data } = await apiClient.get<ParentAccount>("api/v1/auth/me");
+  me: async (): Promise<ManagerAccount> => {
+    const { data } = await apiClient.get<ManagerAccount>("api/v1/auth/me");
     return data;
   },
 
-  updateProfile: async (input: UpdateProfileInput): Promise<ParentAccount> => {
-    const { data } = await apiClient.patch<ParentAccount>(
+  updateProfile: async (input: UpdateProfileInput): Promise<ManagerAccount> => {
+    const { data } = await apiClient.patch<ManagerAccount>(
       "api/v1/auth/me",
       input,
     );

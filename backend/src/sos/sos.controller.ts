@@ -60,7 +60,7 @@ export class SosController {
     @Query('limit') limit?: string,
   ) {
     const parsed = limit ? Math.min(parseInt(limit, 10) || 50, 200) : 50;
-    return this.sosService.listForParent(req.parentAccount.sub, parsed);
+    return this.sosService.listForParent(req.managerAccount.sub, parsed);
   }
 
   @Post('sos/:id/ack')
@@ -72,7 +72,7 @@ export class SosController {
     @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<void> {
-    return this.sosService.acknowledge(id, req.parentAccount.sub);
+    return this.sosService.acknowledge(id, req.managerAccount.sub);
   }
 
   @Post('sos/ack-all')
@@ -82,7 +82,7 @@ export class SosController {
     summary: 'Đánh dấu tất cả SOS chưa xử lý của parent này là đã xử lý',
   })
   acknowledgeAll(@Req() req: AuthedRequest): Promise<{ count: number }> {
-    return this.sosService.acknowledgeAll(req.parentAccount.sub);
+    return this.sosService.acknowledgeAll(req.managerAccount.sub);
   }
 
   @Delete('sos/acknowledged')
@@ -92,6 +92,6 @@ export class SosController {
     summary: 'Xoá vĩnh viễn lịch sử SOS đã xử lý (giữ event chưa xử lý)',
   })
   deleteAcknowledged(@Req() req: AuthedRequest): Promise<{ count: number }> {
-    return this.sosService.deleteAcknowledged(req.parentAccount.sub);
+    return this.sosService.deleteAcknowledged(req.managerAccount.sub);
   }
 }

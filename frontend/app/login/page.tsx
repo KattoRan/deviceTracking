@@ -10,7 +10,7 @@ import axios from "axios";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const { parentAccount, login, loading } = useAuth();
+  const { managerAccount, login, loading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -19,10 +19,10 @@ function LoginForm() {
   const redirectTo = params.get("from") || "/";
 
   useEffect(() => {
-    if (!loading && parentAccount) {
+    if (!loading && managerAccount) {
       router.replace(redirectTo);
     }
-  }, [parentAccount, loading, redirectTo, router]);
+  }, [managerAccount, loading, redirectTo, router]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

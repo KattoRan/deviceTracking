@@ -22,7 +22,7 @@ export interface ConnectedBts {
 export interface Device {
   id: string;
   name: string;
-  person_name: string;
+  owner_name: string;
   phone_number: string | null;
   model: string | null;
   device_os: string | null;
@@ -58,7 +58,7 @@ export interface Device {
 /** GET /api/v1/devices/:id */
 export interface DeviceDetail {
   id: string;
-  person_name: string;
+  owner_name: string;
   phone_number: string | null;
   model: string | null;
   device_os: string | null;
@@ -125,7 +125,7 @@ export interface LocationHistory {
   device: {
     id: string;
     name: string;
-    person_name: string;
+    owner_name: string;
     phone_number: string | null;
   };
   from: string;

@@ -10,7 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   LoginDto,
   LoginResponseDto,
-  ParentAccountDto,
+  ManagerAccountDto,
   RegisterDto,
   UpdateProfileDto,
 } from './dto/login.dto';
@@ -20,7 +20,7 @@ const BCRYPT_ROUNDS = 10;
 const MAX_PAIRING_CODE_ATTEMPTS = 5;
 
 export interface JwtPayload {
-  sub: string; // parentAccountId
+  sub: string; // managerAccountId
   email: string;
 }
 
@@ -35,7 +35,7 @@ export class AuthService {
 
   async register(dto: RegisterDto): Promise<LoginResponseDto> {
     const email = dto.email.trim().toLowerCase();
-    const existing = await this.prisma.parent_accounts.findUnique({
+    const existing = await this.prisma.manager_accounts.findUnique({
       where: { email },
     });
     if (existing) {
@@ -45,7 +45,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     const pairingCode = await this.allocatePairingCode();
 
-    const account = await this.prisma.parent_accounts.create({
+    const account = await this.prisma.manager_accounts.create({
       data: {
         email,
         password_hash: passwordHash,
@@ -61,7 +61,7 @@ export class AuthService {
 
   async login(dto: LoginDto): Promise<LoginResponseDto> {
     const email = dto.email.trim().toLowerCase();
-    const account = await this.prisma.parent_accounts.findUnique({
+    const account = await this.prisma.manager_accounts.findUnique({
       where: { email },
     });
     if (!account) throw new UnauthorizedException('Sai email hoặc mật khẩu');
@@ -72,8 +72,8 @@ export class AuthService {
     return this.buildSession(account);
   }
 
-  async findById(id: string): Promise<ParentAccountDto> {
-    const account = await this.prisma.parent_accounts.findUnique({
+  async findById(id: string): Promise<ManagerAccountDto> {
+    const account = await this.prisma.manager_accounts.findUnique({
       where: { id },
     });
     if (!account) throw new UnauthorizedException('Tài khoản không tồn tại');
@@ -83,13 +83,13 @@ export class AuthService {
   async updateProfile(
     id: string,
     dto: UpdateProfileDto,
-  ): Promise<ParentAccountDto> {
+  ): Promise<ManagerAccountDto> {
     const data: { phone_number?: string | null } = {};
     if (dto.phoneNumber !== undefined) {
       const trimmed = dto.phoneNumber?.trim();
       data.phone_number = trimmed ? trimmed : null;
     }
-    const account = await this.prisma.parent_accounts.update({
+    const account = await this.prisma.manager_accounts.update({
       where: { id },
       data,
     });
@@ -102,7 +102,7 @@ export class AuthService {
     display_name: string | null;
     phone_number: string | null;
     pairing_code: string;
-  }): ParentAccountDto {
+  }): ManagerAccountDto {
     return {
       id: account.id,
       email: account.email,
@@ -123,7 +123,7 @@ export class AuthService {
     const token = await this.jwt.signAsync(payload);
     return {
       token,
-      parentAccount: {
+      managerAccount: {
         id: account.id,
         email: account.email,
         displayName: account.display_name,
@@ -136,7 +136,7 @@ export class AuthService {
   private async allocatePairingCode(): Promise<string> {
     for (let attempt = 0; attempt < MAX_PAIRING_CODE_ATTEMPTS; attempt++) {
       const code = generatePairingCode();
-      const taken = await this.prisma.parent_accounts.findUnique({
+      const taken = await this.prisma.manager_accounts.findUnique({
         where: { pairing_code: code },
         select: { id: true },
       });

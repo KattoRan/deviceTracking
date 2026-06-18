@@ -40,7 +40,7 @@ export class LoginDto {
   password: string;
 }
 
-export class ParentAccountDto {
+export class ManagerAccountDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
@@ -61,8 +61,8 @@ export class LoginResponseDto {
   @ApiProperty()
   token: string;
 
-  @ApiProperty({ type: ParentAccountDto })
-  parentAccount: ParentAccountDto;
+  @ApiProperty({ type: ManagerAccountDto })
+  managerAccount: ManagerAccountDto;
 }
 
 export class UpdateProfileDto {

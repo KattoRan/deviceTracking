@@ -435,7 +435,7 @@ function DetailDrawer({
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-slate-900">
-                {detail?.person_name || "Chi tiết thiết bị"}
+                {detail?.owner_name || "Chi tiết thiết bị"}
               </p>
               <p className="truncate text-xs text-slate-500">{detail?.model || "--"}</p>
             </div>
@@ -485,7 +485,7 @@ function DetailDrawer({
             </div>
 
             <DetailSection icon={User} title="Người được giám sát">
-              <DetailRow label="Tên" value={detail.person_name} />
+              <DetailRow label="Tên" value={detail.owner_name} />
               {detail.last_battery != null && (
                 <DetailRow
                   label="Pin"
@@ -580,7 +580,7 @@ function DetailDrawer({
       </aside>
       {confirmingDelete && (
         <DeleteConfirmModal
-          deviceName={detail?.person_name || detail?.phone_number || deviceId}
+          deviceName={detail?.owner_name || detail?.phone_number || deviceId}
           deleting={deleting}
           error={deleteError}
           onCancel={() => {

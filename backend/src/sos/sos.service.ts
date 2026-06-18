@@ -31,8 +31,8 @@ export class SosService {
       where: { id: deviceId },
       select: {
         id: true,
-        parent_account_id: true,
-        person_name: true,
+        manager_account_id: true,
+        owner_name: true,
       },
     });
     if (!device) throw new NotFoundException('Device not found');
@@ -40,7 +40,7 @@ export class SosService {
     const event = await this.prisma.sos_events.create({
       data: {
         device_id: deviceId,
-        parent_account_id: device.parent_account_id,
+        manager_account_id: device.manager_account_id,
         lat: dto.lat,
         lon: dto.lon,
         accuracy_m: dto.accuracy ?? null,
@@ -49,14 +49,14 @@ export class SosService {
     });
 
     this.logger.warn(
-      `🆘 SOS device=${deviceId} (${device.person_name}) ` +
+      `🆘 SOS device=${deviceId} (${device.owner_name}) ` +
         `pos=(${dto.lat},${dto.lon}) battery=${dto.batteryLevel ?? '?'}%`,
     );
 
     this.events.emitSosAlert({
       sosEventId: event.id,
       deviceId,
-      deviceName: device.person_name,
+      deviceName: device.owner_name,
       lat: dto.lat,
       lon: dto.lon,
       accuracy: dto.accuracy ?? null,
@@ -70,19 +70,19 @@ export class SosService {
     };
   }
 
-  async listForParent(parentAccountId: string, limit = 50) {
+  async listForParent(managerAccountId: string, limit = 50) {
     const events = await this.prisma.sos_events.findMany({
-      where: { parent_account_id: parentAccountId },
+      where: { manager_account_id: managerAccountId },
       orderBy: { triggered_at: 'desc' },
       take: limit,
       include: {
-        device: { select: { id: true, person_name: true } },
+        device: { select: { id: true, owner_name: true } },
       },
     });
     return events.map((e) => ({
       id: e.id,
       deviceId: e.device_id,
-      personName: e.device.person_name,
+      ownerName: e.device.owner_name,
       lat: Number(e.lat),
       lon: Number(e.lon),
       accuracy: e.accuracy_m,
@@ -94,14 +94,14 @@ export class SosService {
 
   async acknowledge(
     eventId: string,
-    parentAccountId: string,
+    managerAccountId: string,
   ): Promise<void> {
     const event = await this.prisma.sos_events.findUnique({
       where: { id: eventId },
-      select: { parent_account_id: true },
+      select: { manager_account_id: true },
     });
     if (!event) throw new NotFoundException('SOS event not found');
-    if (event.parent_account_id !== parentAccountId) {
+    if (event.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với SOS event này');
     }
     await this.prisma.sos_events.update({
@@ -112,13 +112,13 @@ export class SosService {
 
   /**
    * Đánh dấu tất cả SOS chưa xử lý của parent này là đã xử lý — dùng cho nút
-   * "Xử lý tất cả" trên trang lịch sử SOS. Scope cứng theo parent_account_id
+   * "Xử lý tất cả" trên trang lịch sử SOS. Scope cứng theo manager_account_id
    * trong filter để không leak event của parent khác.
    */
-  async acknowledgeAll(parentAccountId: string): Promise<{ count: number }> {
+  async acknowledgeAll(managerAccountId: string): Promise<{ count: number }> {
     const result = await this.prisma.sos_events.updateMany({
       where: {
-        parent_account_id: parentAccountId,
+        manager_account_id: managerAccountId,
         acknowledged_at: null,
       },
       data: { acknowledged_at: new Date() },
@@ -130,10 +130,10 @@ export class SosService {
    * Xoá vĩnh viễn các SOS event đã xử lý của parent này — nút "Xoá lịch sử".
    * KHÔNG xoá event chưa xử lý (vẫn cần hiển thị làm cảnh báo active).
    */
-  async deleteAcknowledged(parentAccountId: string): Promise<{ count: number }> {
+  async deleteAcknowledged(managerAccountId: string): Promise<{ count: number }> {
     const result = await this.prisma.sos_events.deleteMany({
       where: {
-        parent_account_id: parentAccountId,
+        manager_account_id: managerAccountId,
         acknowledged_at: { not: null },
       },
     });

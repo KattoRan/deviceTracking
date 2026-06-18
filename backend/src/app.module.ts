@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AlertsModule } from './alerts/alerts.module';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { BtsModule } from './bts/bts.module';
 import { CommandsModule } from './commands/commands.module';
@@ -31,7 +29,5 @@ import { SosModule } from './sos/sos.module';
     CommandsModule,
     SosModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

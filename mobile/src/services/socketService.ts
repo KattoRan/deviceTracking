@@ -5,12 +5,9 @@ import type {
   CommandResultBody,
   DeviceDeletedEvent,
   DeviceLockChangedEvent,
-  DeviceMovedEvent,
   GeofenceBreachEvent,
-
 } from '../models/types';
 
-type DeviceMovedCallback = (event: DeviceMovedEvent) => void;
 type CommandCallback = (event: CommandDispatchEvent) => void;
 type GeofenceBreachCallback = (event: GeofenceBreachEvent) => void;
 type DeviceDeletedCallback = (event: DeviceDeletedEvent) => void;
@@ -18,7 +15,6 @@ type DeviceLockChangedCallback = (event: DeviceLockChangedEvent) => void;
 
 let socket: Socket | null = null;
 let joinedDeviceId: string | null = null;
-const deviceMovedListeners = new Set<DeviceMovedCallback>();
 const commandListeners = new Set<CommandCallback>();
 const geofenceBreachListeners = new Set<GeofenceBreachCallback>();
 const deviceDeletedListeners = new Set<DeviceDeletedCallback>();
@@ -62,9 +58,6 @@ export function connectSocket(): Socket {
     console.log('[socket] disconnect:', reason),
   );
 
-  socket.on('device_moved', (event: DeviceMovedEvent) =>
-    fanOut(deviceMovedListeners, event),
-  );
   socket.on('command', (event: CommandDispatchEvent) =>
     fanOut(commandListeners, event),
   );
@@ -96,10 +89,6 @@ export function disconnectSocket(): void {
   joinedDeviceId = null;
 }
 
-export function isSocketConnected(): boolean {
-  return socket?.connected ?? false;
-}
-
 /**
  * Subscribes this socket to commands targeted at `deviceId`. Safe to call
  * before the socket connects — the id is re-sent on every reconnect.
@@ -110,14 +99,6 @@ export function joinDeviceRoom(deviceId: string): void {
   if (socket?.connected) {
     socket.emit('join_device', { deviceId });
   }
-}
-
-export function onDeviceMoved(cb: DeviceMovedCallback): () => void {
-  if (!socket) connectSocket();
-  deviceMovedListeners.add(cb);
-  return () => {
-    deviceMovedListeners.delete(cb);
-  };
 }
 
 export function onCommand(cb: CommandCallback): () => void {

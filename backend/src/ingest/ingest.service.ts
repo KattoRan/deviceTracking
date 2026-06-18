@@ -4,7 +4,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { AlertsService } from '../alerts/alerts.service';
 import { BtsService } from '../bts/bts.service';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
@@ -74,7 +73,6 @@ export class IngestService {
     private readonly btsService: BtsService,
     private readonly eventsGateway: EventsGateway,
     private readonly geofenceState: GeofenceStateService,
-    private readonly alerts: AlertsService,
   ) {}
 
   /** Trả true nếu emit này quá gần (cả không gian + thời gian) emit trước → skip. */
@@ -112,9 +110,9 @@ export class IngestService {
       where: { id: deviceId },
       select: {
         id: true,
-        person_name: true,
+        owner_name: true,
         phone_number: true,
-        parent_account_id: true,
+        manager_account_id: true,
         is_low_battery_alerted: true,
         is_offline_alerted: true,
         device_geofences: {
@@ -241,8 +239,8 @@ export class IngestService {
         cells,
         latestAt,
         dto.batteryLevel,
-        device.person_name,
-        device.parent_account_id,
+        device.owner_name,
+        device.manager_account_id,
       );
 
       // Geofence eval chỉ với fix tier gps + không nghi spoof — fix
@@ -254,8 +252,8 @@ export class IngestService {
       ) {
         void this.evaluateDeviceZones(
           deviceId,
-          device.person_name,
-          device.parent_account_id,
+          device.owner_name,
+          device.manager_account_id,
           latest.latitude,
           latest.longitude,
           device.device_geofences.map((dg) => dg.geofence),
@@ -323,17 +321,13 @@ export class IngestService {
     if (lowBatteryTransition === 'arm' && batteryLevel != null) {
       const lowEvent = {
         deviceId,
-        deviceName: device.person_name,
+        deviceName: device.owner_name,
         batteryLevel,
         timestamp: now.toISOString(),
       };
       this.eventsGateway.emitLowBattery(lowEvent);
-      void this.alerts.dispatchLowBatteryPush(
-        device.parent_account_id,
-        lowEvent,
-      );
       this.logger.warn(
-        `Low battery (heartbeat) device=${deviceId} (${device.person_name ?? '?'}) ${batteryLevel}%`,
+        `Low battery (heartbeat) device=${deviceId} (${device.owner_name ?? '?'}) ${batteryLevel}%`,
       );
     }
 
@@ -350,7 +344,7 @@ export class IngestService {
   private async evaluateDeviceZones(
     deviceId: string,
     deviceName: string | null,
-    parentAccountId: string,
+    managerAccountId: string,
     lat: number,
     lon: number,
     geofences: Array<{
@@ -424,7 +418,6 @@ export class IngestService {
       if (!isTransition) return;
 
       this.eventsGateway.emitGeofenceBreach(event);
-      void this.alerts.dispatchGeofenceBreachPush(parentAccountId, event);
 
       this.logger.warn(
         `Geofence ${current === 'outside' ? 'BREACH' : 'RETURN'} ` +
@@ -444,8 +437,8 @@ export class IngestService {
     cells: NormalizedCell[],
     latestAt: Date,
     batteryLevel: number | undefined,
-    personName: string | null,
-    parentAccountId: string,
+    ownerName: string | null,
+    managerAccountId: string,
   ): Promise<void> {
     try {
       // Pre-check battery state to know whether we need to flip alert flags
@@ -541,14 +534,13 @@ export class IngestService {
       if (lowBatteryTransition === 'arm' && batteryLevel != null) {
         const lowEvent = {
           deviceId,
-          deviceName: personName,
+          deviceName: ownerName,
           batteryLevel,
           timestamp: latestAt.toISOString(),
         };
         this.eventsGateway.emitLowBattery(lowEvent);
-        void this.alerts.dispatchLowBatteryPush(parentAccountId, lowEvent);
         this.logger.warn(
-          `Low battery device=${deviceId} (${personName ?? '?'}) ${batteryLevel}%`,
+          `Low battery device=${deviceId} (${ownerName ?? '?'}) ${batteryLevel}%`,
         );
       }
 

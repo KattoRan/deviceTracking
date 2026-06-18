@@ -8,7 +8,7 @@ datasource db {
   extensions = [postgis]
 }
 
-model parent_accounts {
+model manager_accounts {
   id            String   @id @default(uuid())
   email         String   @unique
   password_hash String
@@ -23,21 +23,21 @@ model parent_accounts {
 }
 
 model devices {
-  id                String     @id @default(uuid())
-  parent_account_id String
-  person_name       String
-  phone_number      String?
-  model             String?
-  type              String?
-  device_os         String?
-  is_locked         Boolean    @default(false)
-  last_seen         DateTime?
-  last_battery      Int?
-  is_offline_alerted Boolean   @default(false)
+  id                 String     @id @default(uuid())
+  manager_account_id String
+  owner_name         String
+  phone_number       String?
+  model              String?
+  type               String?
+  device_os          String?
+  is_locked          Boolean    @default(false)
+  last_seen          DateTime?
+  last_battery       Int?
+  is_offline_alerted Boolean    @default(false)
   is_low_battery_alerted Boolean @default(false)
-  registered_at     DateTime   @default(now())
+  registered_at      DateTime   @default(now())
 
-  parent_account parent_accounts @relation(fields: [parent_account_id], references: [id], onDelete: Cascade)
+  manager_account manager_accounts @relation(fields: [manager_account_id], references: [id], onDelete: Cascade)
 
   location_history   location_history[]
   cell_tower_history cell_tower_history[]
@@ -45,22 +45,22 @@ model devices {
   device_geofences   device_geofences[]
   sos_events         sos_events[]
 
-  @@index([parent_account_id])
+  @@index([manager_account_id])
 }
 
 model geofences {
-  id                String   @id @default(uuid())
-  parent_account_id String
-  name              String
-  lat               Decimal  @db.Decimal(10, 8)
-  lon               Decimal  @db.Decimal(11, 8)
-  radius_m          Int
-  created_at        DateTime @default(now())
-  updated_at        DateTime @default(now()) @updatedAt
+  id                 String   @id @default(uuid())
+  manager_account_id String
+  name               String
+  lat                Decimal  @db.Decimal(10, 8)
+  lon                Decimal  @db.Decimal(11, 8)
+  radius_m           Int
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
 
   device_geofences device_geofences[]
 
-  @@index([parent_account_id])
+  @@index([manager_account_id])
 }
 
 model device_geofences {
@@ -162,40 +162,21 @@ model bts_stations {
   @@index([mcc, mnc, lac, cid])
 }
 
-model bts_raw {
-  radio    String?
-  mcc      Int?
-  mnc      Int?
-  lac      Int?
-  cid      BigInt?
-  psc      Int?
-  lon      Float?
-  lat      Float?
-  range    Int?
-  rssi     Int?
-  status   Int?
-  ts1      BigInt?
-  ts2      BigInt?
-  reserved Int?
-
-  @@ignore
-}
-
 model sos_events {
-  id                String   @id @default(uuid())
-  device_id         String
-  parent_account_id String
-  lat               Decimal  @db.Decimal(10, 8)
-  lon               Decimal  @db.Decimal(11, 8)
-  accuracy_m        Float?
-  battery_level     Int?
-  triggered_at      DateTime @default(now())
-  acknowledged_at   DateTime?
+  id                 String   @id @default(uuid())
+  device_id          String
+  manager_account_id String
+  lat                Decimal  @db.Decimal(10, 8)
+  lon                Decimal  @db.Decimal(11, 8)
+  accuracy_m         Float?
+  battery_level      Int?
+  triggered_at       DateTime @default(now())
+  acknowledged_at    DateTime?
 
-  device         devices         @relation(fields: [device_id], references: [id], onDelete: Cascade)
-  parent_account parent_accounts @relation(fields: [parent_account_id], references: [id], onDelete: Cascade)
+  device          devices          @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  manager_account manager_accounts @relation(fields: [manager_account_id], references: [id], onDelete: Cascade)
 
-  @@index([parent_account_id, triggered_at])
+  @@index([manager_account_id, triggered_at])
   @@index([device_id, triggered_at])
 }
 

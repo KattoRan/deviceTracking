@@ -1,6 +1,6 @@
 export interface PairDeviceRequest {
   pairingCode: string;
-  personName: string;
+  ownerName: string;
   phoneNumber?: string;
   device?: {
     model?: string;
@@ -11,12 +11,12 @@ export interface PairDeviceRequest {
 
 export interface PairDeviceResponse {
   deviceId: string;
-  personName: string;
+  ownerName: string;
 }
 
 export interface StoredDeviceData {
   deviceId: string;
-  personName: string;
+  ownerName: string;
   pairedAt: string;
 }
 
@@ -97,32 +97,6 @@ export interface IngestPayload {
 export interface IngestResponse {
   success: boolean;
   message?: string;
-}
-
-export interface CellTowerInfoRealtime extends CellTower {
-  isServing: boolean;
-}
-
-export interface ConnectedBts {
-  id: number;
-  lat: number;
-  lon: number;
-  radio: string | null;
-  range: number | null;
-}
-
-export interface DeviceMovedEvent {
-  deviceId: string;
-  lat: number;
-  lon: number;
-  accuracy: number | null;
-  quality: LocationQuality | null;
-  cid: number | null;
-  lac: number | null;
-  signalDbm: number | null;
-  timestamp: string;
-  cellTowers: CellTowerInfoRealtime[];
-  connectedBts: ConnectedBts | null;
 }
 
 export type CommandName =

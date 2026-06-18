@@ -50,7 +50,7 @@ export class CommandsController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: CreateCommandDto,
   ) {
-    return this.commandsService.createCommand(id, req.parentAccount.sub, dto);
+    return this.commandsService.createCommand(id, req.managerAccount.sub, dto);
   }
 
   @Get('devices/:id/commands')
@@ -62,7 +62,7 @@ export class CommandsController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: ListCommandsQueryDto,
   ) {
-    return this.commandsService.listForDevice(id, req.parentAccount.sub, query);
+    return this.commandsService.listForDevice(id, req.managerAccount.sub, query);
   }
 
   @Get('commands/:commandId')

@@ -17,7 +17,7 @@ import { useAuth } from "@/components/AuthProvider";
 
 export default function AccountPage() {
   const router = useRouter();
-  const { parentAccount, updateProfile, logout } = useAuth();
+  const { managerAccount, updateProfile, logout } = useAuth();
   const [copied, setCopied] = useState(false);
   const [phoneInput, setPhoneInput] = useState("");
   const [phoneSaving, setPhoneSaving] = useState(false);
@@ -25,13 +25,13 @@ export default function AccountPage() {
   const [phoneSaved, setPhoneSaved] = useState(false);
 
   useEffect(() => {
-    setPhoneInput(parentAccount?.phoneNumber ?? "");
-  }, [parentAccount?.phoneNumber]);
+    setPhoneInput(managerAccount?.phoneNumber ?? "");
+  }, [managerAccount?.phoneNumber]);
 
   async function copyCode() {
-    if (!parentAccount) return;
+    if (!managerAccount) return;
     try {
-      await navigator.clipboard.writeText(parentAccount.pairingCode);
+      await navigator.clipboard.writeText(managerAccount.pairingCode);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -69,9 +69,9 @@ export default function AccountPage() {
   }
 
   const phoneDirty =
-    phoneInput.trim() !== (parentAccount?.phoneNumber ?? "").trim();
+    phoneInput.trim() !== (managerAccount?.phoneNumber ?? "").trim();
 
-  if (!parentAccount) return null;
+  if (!managerAccount) return null;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 md:px-8 md:py-8">
@@ -96,14 +96,14 @@ export default function AccountPage() {
               Email
             </dt>
             <dd className="font-medium text-slate-900">
-              {parentAccount.email}
+              {managerAccount.email}
             </dd>
           </div>
-          {parentAccount.displayName && (
+          {managerAccount.displayName && (
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">Tên hiển thị</dt>
               <dd className="font-medium text-slate-900">
-                {parentAccount.displayName}
+                {managerAccount.displayName}
               </dd>
             </div>
           )}
@@ -128,7 +128,7 @@ export default function AccountPage() {
             Mã ghép thiết bị
           </p>
           <div className="my-3 select-all font-mono text-4xl font-black tracking-widest text-emerald-900">
-            {parentAccount.pairingCode}
+            {managerAccount.pairingCode}
           </div>
           <button
             type="button"

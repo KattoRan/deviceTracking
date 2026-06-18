@@ -399,7 +399,7 @@ export default function DeviceDetailPanel({
               <Row
                 icon={User}
                 label="Người dùng"
-                value={detail?.person_name || device.person_name || "--"}
+                value={detail?.owner_name || device.owner_name || "--"}
               />
               <Row
                 icon={Phone}

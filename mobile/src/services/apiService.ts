@@ -133,7 +133,7 @@ export function fetchAdminContact(
   deviceId: string,
 ): Promise<{ displayName: string | null; phoneNumber: string | null }> {
   return request<{ displayName: string | null; phoneNumber: string | null }>(
-    `api/v1/devices/${deviceId}/parent-contact`,
+    `api/v1/devices/${deviceId}/manager-contact`,
     { method: 'GET' },
   );
 }

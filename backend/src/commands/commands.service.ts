@@ -45,15 +45,15 @@ export class CommandsService {
 
   async createCommand(
     deviceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     dto: CreateCommandDto,
   ) {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      select: { id: true, parent_account_id: true },
+      select: { id: true, manager_account_id: true },
     });
     if (!device) throw new NotFoundException('Device not found');
-    if (device.parent_account_id !== parentAccountId) {
+    if (device.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với thiết bị này');
     }
 
@@ -94,15 +94,15 @@ export class CommandsService {
 
   async listForDevice(
     deviceId: string,
-    parentAccountId: string,
+    managerAccountId: string,
     query: ListCommandsQueryDto,
   ) {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },
-      select: { id: true, parent_account_id: true },
+      select: { id: true, manager_account_id: true },
     });
     if (!device) throw new NotFoundException('Device not found');
-    if (device.parent_account_id !== parentAccountId) {
+    if (device.manager_account_id !== managerAccountId) {
       throw new ForbiddenException('Không có quyền với thiết bị này');
     }
 

@@ -690,17 +690,6 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
   }
 }
 
-/** Restart service — dùng khi cần reset task (vd sau khi app resume). */
-export async function restartForegroundLocation(): Promise<{ ok: boolean; reason?: string }> {
-  const running = await Location.hasStartedLocationUpdatesAsync(
-    FOREGROUND_LOCATION_TASK,
-  );
-  if (running) {
-    await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
-  }
-  return startForegroundLocation();
-}
-
 export async function stopForegroundLocation(): Promise<void> {
   const running = await Location.hasStartedLocationUpdatesAsync(
     FOREGROUND_LOCATION_TASK,
@@ -713,14 +702,4 @@ export async function stopForegroundLocation(): Promise<void> {
   cellCache = null;
   lastFixTime = null;
   unsubscribeAccelerometer();
-}
-
-export async function isForegroundLocationActive(): Promise<boolean> {
-  try {
-    return await Location.hasStartedLocationUpdatesAsync(
-      FOREGROUND_LOCATION_TASK,
-    );
-  } catch {
-    return false;
-  }
 }

@@ -44,13 +44,13 @@ export class GeofencesController {
     @Req() req: AuthedRequest,
     @Body() dto: CreateGeofenceDto,
   ): Promise<GeofenceDetail> {
-    return this.geofencesService.create(req.parentAccount.sub, dto);
+    return this.geofencesService.create(req.managerAccount.sub, dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Danh sách vùng giám sát của phụ huynh' })
   findAll(@Req() req: AuthedRequest): Promise<GeofenceListItem[]> {
-    return this.geofencesService.findAll(req.parentAccount.sub);
+    return this.geofencesService.findAll(req.managerAccount.sub);
   }
 
   @Get('breaches/active')
@@ -58,7 +58,7 @@ export class GeofencesController {
     summary: 'Danh sách thiết bị hiện đang ngoài vùng giám sát (của phụ huynh)',
   })
   listActiveBreaches(@Req() req: AuthedRequest): Promise<GeofenceBreachEvent[]> {
-    return this.geofencesService.listActiveBreaches(req.parentAccount.sub);
+    return this.geofencesService.listActiveBreaches(req.managerAccount.sub);
   }
 
   @Get(':id')
@@ -67,7 +67,7 @@ export class GeofencesController {
     @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<GeofenceDetail> {
-    return this.geofencesService.findOne(id, req.parentAccount.sub);
+    return this.geofencesService.findOne(id, req.managerAccount.sub);
   }
 
   @Patch(':id')
@@ -78,7 +78,7 @@ export class GeofencesController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateGeofenceDto,
   ): Promise<GeofenceDetail> {
-    return this.geofencesService.update(id, req.parentAccount.sub, dto);
+    return this.geofencesService.update(id, req.managerAccount.sub, dto);
   }
 
   @Delete(':id')
@@ -91,7 +91,7 @@ export class GeofencesController {
     @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<void> {
-    return this.geofencesService.remove(id, req.parentAccount.sub);
+    return this.geofencesService.remove(id, req.managerAccount.sub);
   }
 
   @Post(':id/devices')
@@ -103,7 +103,7 @@ export class GeofencesController {
   ): Promise<GeofenceDetail> {
     return this.geofencesService.assignDevice(
       id,
-      req.parentAccount.sub,
+      req.managerAccount.sub,
       dto.deviceId,
     );
   }
@@ -117,7 +117,7 @@ export class GeofencesController {
   ): Promise<GeofenceDetail> {
     return this.geofencesService.setDevices(
       id,
-      req.parentAccount.sub,
+      req.managerAccount.sub,
       dto.deviceIds,
     );
   }
@@ -131,7 +131,7 @@ export class GeofencesController {
   ): Promise<GeofenceDetail> {
     return this.geofencesService.detachDevice(
       id,
-      req.parentAccount.sub,
+      req.managerAccount.sub,
       deviceId,
     );
   }

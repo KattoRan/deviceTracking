@@ -12,25 +12,25 @@ import {
 import { authService, tokenStorage } from "@/services/authService";
 import type {
   LoginInput,
-  ParentAccount,
+  ManagerAccount,
   RegisterInput,
   UpdateProfileInput,
 } from "@/types/admin";
 
 interface AuthContextValue {
-  parentAccount: ParentAccount | null;
+  managerAccount: ManagerAccount | null;
   loading: boolean;
   login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<ParentAccount>;
+  register: (input: RegisterInput) => Promise<ManagerAccount>;
   refresh: () => Promise<void>;
-  updateProfile: (input: UpdateProfileInput) => Promise<ParentAccount>;
+  updateProfile: (input: UpdateProfileInput) => Promise<ManagerAccount>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [parentAccount, setParentAccount] = useState<ParentAccount | null>(
+  const [managerAccount, setManagerAccount] = useState<ManagerAccount | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
@@ -38,10 +38,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const me = await authService.me();
-      setParentAccount(me);
+      setManagerAccount(me);
     } catch {
       tokenStorage.clear();
-      setParentAccount(null);
+      setManagerAccount(null);
     }
   }, []);
 
@@ -63,23 +63,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (input: LoginInput) => {
     const res = await authService.login(input);
     tokenStorage.set(res.token);
-    setParentAccount(res.parentAccount);
+    setManagerAccount(res.managerAccount);
   }, []);
 
   const register = useCallback(
-    async (input: RegisterInput): Promise<ParentAccount> => {
+    async (input: RegisterInput): Promise<ManagerAccount> => {
       const res = await authService.register(input);
       tokenStorage.set(res.token);
-      setParentAccount(res.parentAccount);
-      return res.parentAccount;
+      setManagerAccount(res.managerAccount);
+      return res.managerAccount;
     },
     [],
   );
 
   const updateProfile = useCallback(
-    async (input: UpdateProfileInput): Promise<ParentAccount> => {
+    async (input: UpdateProfileInput): Promise<ManagerAccount> => {
       const updated = await authService.updateProfile(input);
-      setParentAccount(updated);
+      setManagerAccount(updated);
       return updated;
     },
     [],
@@ -87,12 +87,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     tokenStorage.clear();
-    setParentAccount(null);
+    setManagerAccount(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      parentAccount,
+      managerAccount,
       loading,
       login,
       register,
@@ -100,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updateProfile,
       logout,
     }),
-    [parentAccount, loading, login, register, refresh, updateProfile, logout],
+    [managerAccount, loading, login, register, refresh, updateProfile, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

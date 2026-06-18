@@ -62,24 +62,24 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { parentAccount, loading, logout } = useAuth();
+  const { managerAccount, loading, logout } = useAuth();
 
   const isPublic = PUBLIC_ROUTES.has(pathname);
 
   useEffect(() => {
     if (loading) return;
-    if (!parentAccount && !isPublic) {
+    if (!managerAccount && !isPublic) {
       const from = encodeURIComponent(pathname);
       router.replace(`/login?from=${from}`);
     }
-  }, [parentAccount, loading, isPublic, pathname, router]);
+  }, [managerAccount, loading, isPublic, pathname, router]);
 
   // Login/Register pages render standalone (no nav, no guard).
   if (isPublic) {
     return <>{children}</>;
   }
 
-  if (loading || !parentAccount) {
+  if (loading || !managerAccount) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
         Đang tải…

@@ -53,7 +53,7 @@ export class DevicesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Danh sách thiết bị của phụ huynh' })
   findAll(@Req() req: AuthedRequest) {
-    return this.devicesService.findAll(req.parentAccount.sub);
+    return this.devicesService.findAll(req.managerAccount.sub);
   }
 
   @Get(':id/history')
@@ -70,7 +70,7 @@ export class DevicesController {
   ) {
     return this.devicesService.getLocationHistory(
       id,
-      req.parentAccount.sub,
+      req.managerAccount.sub,
       query.from,
       query.to,
       query.minDistanceMeters,
@@ -89,7 +89,7 @@ export class DevicesController {
     return this.devicesService.getActiveBreach(id);
   }
 
-  @Get(':id/parent-contact')
+  @Get(':id/manager-contact')
   @ApiOperation({
     summary:
       'Thông tin liên lạc của phụ huynh sở hữu thiết bị (tên + sđt). Dùng để hiển thị trên app mobile.',
@@ -120,7 +120,7 @@ export class DevicesController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: { locked: boolean },
   ) {
-    return this.devicesService.setLockStatus(id, req.parentAccount.sub, body.locked);
+    return this.devicesService.setLockStatus(id, req.managerAccount.sub, body.locked);
   }
 
   @Get(':id')
@@ -132,7 +132,7 @@ export class DevicesController {
     @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
-    return this.devicesService.findOne(id, req.parentAccount.sub);
+    return this.devicesService.findOne(id, req.managerAccount.sub);
   }
 
   @Delete(':id')
@@ -146,6 +146,6 @@ export class DevicesController {
     @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<void> {
-    return this.devicesService.remove(id, req.parentAccount.sub);
+    return this.devicesService.remove(id, req.managerAccount.sub);
   }
 }

@@ -19,7 +19,7 @@ import {
 } from '../models/types';
 import { ApiError, pairDevice } from '../services/apiService';
 
-type Field = 'pairingCode' | 'personName' | 'phoneNumber';
+type Field = 'pairingCode' | 'ownerName' | 'phoneNumber';
 type Errors = Partial<Record<Field, string>>;
 
 function normalizePairingInput(raw: string): string {
@@ -32,7 +32,7 @@ export default function PairScreen() {
   const { deviceModel, deviceOS, deviceType, saveDeviceData } = useDeviceInfo();
 
   const [pairingCode, setPairingCode] = useState('');
-  const [personName, setPersonName] = useState('');
+  const [ownerName, setOwnerName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -48,9 +48,9 @@ export default function PairScreen() {
     else if (!PAIRING_CODE_REGEX.test(code))
       next.pairingCode = 'Code có dạng XXX-XXX (6 ký tự)';
 
-    const name = personName.trim();
-    if (!name) next.personName = 'Vui lòng nhập tên';
-    else if (name.length < 1) next.personName = 'Tên quá ngắn';
+    const name = ownerName.trim();
+    if (!name) next.ownerName = 'Vui lòng nhập tên';
+    else if (name.length < 1) next.ownerName = 'Tên quá ngắn';
 
     const phone = phoneNumber.trim();
     if (phone && !PHONE_REGEX.test(phone)) {
@@ -67,7 +67,7 @@ export default function PairScreen() {
 
     const payload: PairDeviceRequest = {
       pairingCode: pairingCode.trim(),
-      personName: personName.trim(),
+      ownerName: ownerName.trim(),
       phoneNumber: phoneNumber.trim() || undefined,
       device: { model: deviceModel, type: deviceType, os: deviceOS },
     };
@@ -76,7 +76,7 @@ export default function PairScreen() {
       const res = await pairDevice(payload);
       await saveDeviceData({
         deviceId: res.deviceId,
-        personName: res.personName,
+        ownerName: res.ownerName,
         pairedAt: new Date().toISOString(),
       });
     } catch (err) {
@@ -136,14 +136,14 @@ export default function PairScreen() {
           <Field
             label="Tên hiển thị"
             required
-            value={personName}
+            value={ownerName}
             onChangeText={(v) => {
-              setPersonName(v);
-              clearError('personName');
+              setOwnerName(v);
+              clearError('ownerName');
             }}
             placeholder="Bé Minh / Bà Hoa"
             autoCapitalize="words"
-            error={errors.personName}
+            error={errors.ownerName}
             editable={!submitting}
           />
 

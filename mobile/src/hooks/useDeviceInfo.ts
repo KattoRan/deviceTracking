@@ -86,7 +86,7 @@ export function DeviceInfoProvider({ children }: { children: ReactNode }) {
             fullName?: string;
             email?: string;
           };
-          if (parsed.deviceId && parsed.personName) {
+          if (parsed.deviceId && parsed.ownerName) {
             setStoredData(parsed as StoredDeviceData);
             setRegistrationStatus('registered');
           } else {
