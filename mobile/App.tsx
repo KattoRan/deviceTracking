@@ -10,7 +10,7 @@ import ReturnedToast from './src/components/ReturnedToast';
 import { GeofenceAlertProvider } from './src/contexts/GeofenceAlertContext';
 import { DeviceInfoProvider, useDeviceInfo } from './src/hooks/useDeviceInfo';
 import type { CommandDispatchEvent, RootStackParamList } from './src/models/types';
-import { fetchLockStatus } from './src/services/apiService';
+import { ApiError, fetchLockStatus } from './src/services/apiService';
 import {
   ackCommand,
   connectSocket,
@@ -56,8 +56,9 @@ function AppContent() {
     return () => disconnectSocket();
   }, [registrationStatus, storedData?.deviceId]);
 
-  // Check lock status from server on app start. If locked, the app blocks
-  // on the LockOverlay and never shows TrackingScreen.
+  // Check lock status from server on app start. Cũng là cơ hội verify device
+  // vẫn tồn tại — nếu admin huỷ ghép lúc app đóng, socket 'device_deleted'
+  // không nhận được; ở đây bắt 404 → wipe local data → fall back Pair screen.
   useEffect(() => {
     if (registrationStatus !== 'registered' || !storedData?.deviceId) return;
     let cancelled = false;
@@ -66,11 +67,23 @@ function AppContent() {
       .then((res) => {
         if (!cancelled) setIsLocked(res.locked);
       })
-      .catch(() => {
-        // If we can't reach the server, assume unlocked so the app works
-        // offline. The socket listener below will lock it in real-time once
-        // connectivity is restored.
-        if (!cancelled) setIsLocked(false);
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
+          // Server xác nhận device không còn tồn tại → admin đã huỷ ghép.
+          // Dọn local registration → AppContent re-render về Pair screen.
+          disconnectSocket();
+          disconnectMqtt();
+          void clearDeviceData();
+          Alert.alert(
+            'Thiết bị đã bị huỷ',
+            'Người quản lý đã huỷ ghép thiết bị này. Vui lòng ghép lại để tiếp tục sử dụng.',
+          );
+          return;
+        }
+        // Network/server unreachable — assume unlocked để app vẫn hoạt động
+        // offline. Socket listener bên dưới sẽ lock realtime khi có mạng lại.
+        setIsLocked(false);
       })
       .finally(() => {
         if (!cancelled) setLockChecking(false);
@@ -78,7 +91,7 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [registrationStatus, storedData?.deviceId]);
+  }, [registrationStatus, storedData?.deviceId, clearDeviceData]);
 
   // Real-time lock/unlock via socket — admin toggles from dashboard.
   useEffect(() => {
