@@ -52,7 +52,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: "Tài khoản", icon: UserCircle, href: "/account" },
 ];
 
-const PUBLIC_ROUTES = new Set(["/login", "/register"]);
+const PUBLIC_ROUTES = new Set(["/", "/login", "/register"]);
 
 interface AppLayoutProps {
   children: ReactNode;

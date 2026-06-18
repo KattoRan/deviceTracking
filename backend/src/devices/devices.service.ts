@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -105,8 +106,9 @@ export class DevicesService {
 
   /**
    * Mobile-side pairing: nhập pairingCode + thông tin người được giám sát →
-   * tạo Device dưới ManagerAccount tương ứng. Phone optional (1 phụ huynh có
-   * thể pair nhiều thiết bị cùng số máy nếu cùng family plan).
+   * tạo Device dưới ManagerAccount tương ứng. Phone optional nhưng nếu có thì
+   * phải duy nhất toàn hệ thống (partial unique index ở DB) — tránh 2 thiết bị
+   * cùng SĐT gây nhầm lẫn khi tra cứu.
    */
   async pair(dto: PairDeviceDto): Promise<PairDeviceResponseDto> {
     const code = normalizePairingCode(dto.pairingCode);
@@ -118,17 +120,48 @@ export class DevicesService {
       throw new UnauthorizedException('Pairing code không hợp lệ');
     }
 
-    const device = await this.prisma.devices.create({
-      data: {
-        manager_account_id: parent.id,
-        owner_name: dto.ownerName.trim(),
-        phone_number: dto.phoneNumber?.trim() || null,
-        model: dto.device?.model?.trim() || null,
-        type: dto.device?.type?.trim() || null,
-        device_os: dto.device?.os?.trim() || null,
-      },
-      select: { id: true, owner_name: true },
-    });
+    const phone = dto.phoneNumber?.trim() || null;
+    // Check duplicate trước insert — UX message rõ ràng hơn so với bắt
+    // P2002 (unique violation) từ Prisma. Race condition (2 request cùng
+    // phone) vẫn được DB partial unique index catch ở insert.
+    if (phone) {
+      const conflict = await this.prisma.devices.findFirst({
+        where: { phone_number: phone },
+        select: { id: true },
+      });
+      if (conflict) {
+        throw new ConflictException(
+          'Số điện thoại đã được đăng ký với thiết bị khác',
+        );
+      }
+    }
+
+    let device;
+    try {
+      device = await this.prisma.devices.create({
+        data: {
+          manager_account_id: parent.id,
+          owner_name: dto.ownerName.trim(),
+          phone_number: phone,
+          model: dto.device?.model?.trim() || null,
+          type: dto.device?.type?.trim() || null,
+          device_os: dto.device?.os?.trim() || null,
+        },
+        select: { id: true, owner_name: true },
+      });
+    } catch (err) {
+      // P2002 = unique constraint violation. Race condition giữa 2 request
+      // cùng phone — chuyển từ 500 thành 409.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'Số điện thoại đã được đăng ký với thiết bị khác',
+        );
+      }
+      throw err;
+    }
 
     this.logger.log(
       `Paired device=${device.id} (${device.owner_name}) to parent=${parent.id}`,
