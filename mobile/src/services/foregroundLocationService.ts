@@ -50,12 +50,15 @@ const FLUSH_BATCH_LIMIT = 50;
 const LOCATION_TIME_INTERVAL_MS = 30_000;
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
-// distanceInterval (m) theo activity. STILL không filter distance (chỉ heartbeat
-// theo timeInterval), MOVING tăng threshold theo tốc độ tự nhiên: walking dense,
-// vehicle thưa hơn để tránh ingest spam khi đi xe nhanh.
+// distanceInterval (m) theo activity. STILL + UNKNOWN dùng 0 vì Android
+// FusedLocationProvider throttle time-based delivery khi smallestDisplacement
+// > 0 và device chưa move đủ — đặt 0 để heartbeat luôn fire mỗi timeInterval.
+// MOVING tăng threshold theo tốc độ tự nhiên: walking dense, vehicle thưa hơn
+// để tránh ingest spam khi đi xe nhanh. Khi user đi xe rồi dừng đèn đỏ,
+// ActivityTransition sẽ detect STILL trong 1-3s và reschedule về 0.
 const DISTANCE_BY_ACTIVITY: Record<Activity, number> = {
-  STILL: 999_999,    // hiệu quả tắt distance trigger, chỉ time fallback
-  UNKNOWN: 10,       // conservative default
+  STILL: 0,          // time-only — heartbeat reliable
+  UNKNOWN: 0,        // conservative until classifier identifies
   WALKING: 5,
   RUNNING: 10,
   ON_BICYCLE: 15,
