@@ -44,6 +44,10 @@ export interface Device {
   spoofingSuspected?: boolean;
   /** Distance (m) between GPS fix and connected BTS. */
   gpsBtsDistanceM?: number | null;
+  /** Activity Recognition từ Google ML (STILL/WALKING/RUNNING/ON_BICYCLE/IN_VEHICLE). */
+  activity?: Activity | null;
+  /** Confidence 0-100 của activity. */
+  activityConfidence?: number | null;
   /** Device is locked by admin. */
   is_locked?: boolean;
   /**
@@ -181,4 +185,16 @@ export interface DeviceMovedEvent {
   gpsBtsDistanceM: number | null;
   /** Epoch ms của fix GPS gần nhất mobile có (chính xác hơn `timestamp`). */
   lastFixAt: number | null;
+  /** Activity Recognition state (Google ML). */
+  activity: Activity | null;
+  /** Confidence 0-100 của activity. */
+  activityConfidence: number | null;
 }
+
+export type Activity =
+  | "STILL"
+  | "WALKING"
+  | "RUNNING"
+  | "ON_BICYCLE"
+  | "IN_VEHICLE"
+  | "UNKNOWN";

@@ -19,11 +19,30 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import deviceService from "@/services/deviceService";
 import type {
+  Activity,
   CellTowerInfo,
   ConnectedBts,
   Device,
   DeviceDetail,
 } from "@/types/device";
+
+const ACTIVITY_LABEL: Record<Activity, string> = {
+  STILL: "Đứng yên",
+  WALKING: "Đang đi bộ",
+  RUNNING: "Đang chạy",
+  ON_BICYCLE: "Đang đi xe đạp",
+  IN_VEHICLE: "Đang lái xe",
+  UNKNOWN: "Không xác định",
+};
+
+const ACTIVITY_ICON: Record<Activity, string> = {
+  STILL: "⏸️",
+  WALKING: "🚶",
+  RUNNING: "🏃",
+  ON_BICYCLE: "🚴",
+  IN_VEHICLE: "🚗",
+  UNKNOWN: "❓",
+};
 import RemoteControlPanel from "./RemoteControlPanel";
 
 interface DeviceDetailPanelProps {
@@ -273,6 +292,22 @@ export default function DeviceDetailPanel({
                 )}
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {device.activity && device.activity !== "UNKNOWN" && (
+        <div className="border-b border-slate-100 px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-base">{ACTIVITY_ICON[device.activity]}</span>
+            <span className="text-xs font-medium text-slate-600">
+              {ACTIVITY_LABEL[device.activity]}
+            </span>
+            {device.activityConfidence != null && (
+              <span className="ml-auto text-[10px] text-slate-400">
+                {device.activityConfidence}% tin cậy
+              </span>
+            )}
           </div>
         </div>
       )}

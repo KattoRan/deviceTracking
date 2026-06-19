@@ -16,6 +16,16 @@ import {
 export const LOCATION_QUALITIES = ['gps', 'approx', 'network'] as const;
 export type LocationQuality = (typeof LOCATION_QUALITIES)[number];
 
+export const ACTIVITIES = [
+  'STILL',
+  'WALKING',
+  'RUNNING',
+  'ON_BICYCLE',
+  'IN_VEHICLE',
+  'UNKNOWN',
+] as const;
+export type Activity = (typeof ACTIVITIES)[number];
+
 export class LocationDto {
   @ApiProperty({ example: 21.028511 })
   @IsNumber()
@@ -151,4 +161,22 @@ export class SubmitDataDto {
   @IsOptional()
   @IsInt()
   lastFixAt?: number;
+
+  /**
+   * Activity recognition từ Google ML model phân loại trạng thái user
+   * (STILL / WALKING / RUNNING / ON_BICYCLE / IN_VEHICLE). Mobile gửi kèm
+   * mỗi telemetry để FE hiện icon + history page color-code segments.
+   */
+  @ApiPropertyOptional({ enum: ACTIVITIES })
+  @IsOptional()
+  @IsIn(ACTIVITIES as readonly string[])
+  activity?: Activity;
+
+  /** Confidence 0-100 của ML model cho activity nói trên. */
+  @ApiPropertyOptional({ example: 85, minimum: 0, maximum: 100 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  activityConfidence?: number;
 }

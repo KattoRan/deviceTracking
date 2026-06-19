@@ -1,12 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Battery from 'expo-battery';
 import * as Location from 'expo-location';
-import { Accelerometer } from 'expo-sensors';
 import * as TaskManager from 'expo-task-manager';
 import { AppState, Vibration } from 'react-native';
 import NativeIngest from 'native-ingest';
 import { API_BASE_URL, API_ENDPOINTS } from '../config/api';
 import type { LocationData, LocationQuality } from '../models/types';
+import {
+  type Activity,
+  getCurrentActivity,
+  getCurrentConfidence,
+  onActivityChange,
+  startActivityRecognition,
+  stopActivityRecognition,
+} from './activityService';
 import { getCellTowerInfo, getCellTowerInfoFresh } from './cellInfoService';
 import { connectMqtt, isMqttConnected, publishTelemetry } from './mqttService';
 
@@ -29,34 +36,35 @@ const ACCURACY_APPROX_M = 80;
 const MAX_ACCEPTABLE_ACCURACY_M = 200;
 const FLUSH_BATCH_LIMIT = 50;
 
-// H1 — Decouple sampling vs sending:
-// - OS wake task theo LOCATION_TIME_INTERVAL_MS (10s) — đủ mượt khi di chuyển
-//   nhanh (xe máy ~30km/h: 10s = 83m gap, vẫn vẽ đường thấy được).
-// - /ingest gửi khi di chuyển đủ (movement gate accuracy-adjusted).
-// - /heartbeat chỉ gửi mỗi HEARTBEAT_MIN_INTERVAL_MS (30s MOVING, 60s STILL)
-//   để giữ last_seen refresh nhưng không spam khi đứng yên (3 task wake = 1 heartbeat).
-const MOVEMENT_THRESHOLD_M = 5;
-const LOCATION_TIME_INTERVAL_MS = 10_000;
+// H1 — Event-driven sampling theo activity:
+// - OS fire task khi di chuyển đủ distanceInterval (theo activity hiện tại),
+//   HOẶC khi LOCATION_TIME_INTERVAL_MS trôi qua (heartbeat fallback).
+// - Activity Recognition (Google ML) classify STILL/WALKING/RUNNING/BICYCLE/VEHICLE,
+//   ở mỗi lần đổi state ta reschedule Location updates với distanceInterval phù hợp.
+// - Movement gate app-level đã bỏ — OS đảm nhiệm filter distance.
+const LOCATION_TIME_INTERVAL_MS = 60_000;  // heartbeat fallback khi không di chuyển
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
+
+// distanceInterval (m) theo activity. STILL không filter distance (chỉ heartbeat
+// theo timeInterval), MOVING tăng threshold theo tốc độ tự nhiên: walking dense,
+// vehicle thưa hơn để tránh ingest spam khi đi xe nhanh.
+const DISTANCE_BY_ACTIVITY: Record<Activity, number> = {
+  STILL: 999_999,    // hiệu quả tắt distance trigger, chỉ time fallback
+  UNKNOWN: 10,       // conservative default
+  WALKING: 5,
+  RUNNING: 10,
+  ON_BICYCLE: 15,
+  IN_VEHICLE: 25,
+};
 
 // H2 — Cell info cache: Telephony scan ~50-200ms mỗi lần, ở interval 5s
 // gọi 12 lần/phút rất tốn. Cells thay đổi rất chậm (handover ~vài phút) →
 // cache 15s vẫn fresh đủ cho mọi tick.
 const CELL_CACHE_TTL_MS = 15_000;
 
-// H4 — Motion detection bằng accelerometer (1Hz):
-// - Sample magnitude = sqrt(x² + y² + z²). Đứng yên: ~9.8 (gravity), variance < 0.05.
-// - Walking/lái xe: oscillates 8-12, variance > 0.3.
-// - Buffer 30 mẫu cuối (30s). Threshold variance đủ tách 2 trạng thái rõ.
-// - Khi STILL: tăng heartbeat throttle lên 60s + tăng movement threshold lên
-//   10m. Khi MOVING: dùng default 30s + 5m.
-// - Movement gate dùng accuracy-adjusted distance: rawDistance - max(acc_new, acc_old)
-//   > threshold. Tránh GPS jitter (±20m) trigger ingest giả khi thiết bị đứng yên.
-const ACCEL_BUFFER_SIZE = 30;
-const ACCEL_SAMPLE_INTERVAL_MS = 1000;
-const STILL_VARIANCE_THRESHOLD = 0.15;
+// Heartbeat throttle khác nhau theo activity — STILL chỉ cần refresh last_seen
+// mỗi 60s, MOVING cần dense hơn để admin map mượt.
 const HEARTBEAT_STILL_MS = 60_000;
-const MOVEMENT_STILL_THRESHOLD_M = 10;
 
 // Buffer tồn tại trong AsyncStorage qua mọi lần restart. Drop fix quá cũ
 // trước khi flush — fix offline > 30 phút không còn ý nghĩa realtime, đẩy
@@ -95,55 +103,16 @@ let cellCache: {
   ts: number;
 } | null = null;
 
-// Accelerometer subscription + ring buffer cho motion detection. Subscribe
-// khi service start (foreground service giữ JS engine alive → events vẫn
-// fire khi app minimized). Unsubscribe khi service stop để khỏi tốn pin.
-let accelSubscription: { remove: () => void } | null = null;
-const accelBuffer: number[] = [];
-
-// Epoch ms của fix GPS mới nhất từ OS — cập nhật mỗi tick task có fix hợp lệ,
-// kể cả khi fix bị movement gate skip không gửi server. FE dùng làm dấu mốc
-// "GPS thực sự hoạt động" → không bị false GPS-lost badge khi user đứng yên.
+// Epoch ms của fix GPS mới nhất từ OS — cập nhật mỗi tick task có fix hợp lệ.
+// FE dùng làm dấu mốc "GPS thực sự hoạt động".
 let lastFixTime: number | null = null;
 
-function subscribeAccelerometer(): void {
-  if (accelSubscription) return;
-  Accelerometer.setUpdateInterval(ACCEL_SAMPLE_INTERVAL_MS);
-  accelSubscription = Accelerometer.addListener(({ x, y, z }) => {
-    const magnitude = Math.sqrt(x * x + y * y + z * z);
-    accelBuffer.push(magnitude);
-    if (accelBuffer.length > ACCEL_BUFFER_SIZE) accelBuffer.shift();
-  });
-}
-
-function unsubscribeAccelerometer(): void {
-  if (accelSubscription) {
-    accelSubscription.remove();
-    accelSubscription = null;
-  }
-  accelBuffer.length = 0;
-}
-
 /**
- * Trả true nếu thiết bị đang đứng yên (variance accelerometer thấp).
- * Cần tối thiểu 10 mẫu (~10s) để quyết định đáng tin — chưa đủ thì coi
- * như MOVING (cẩn trọng, không skip ingest).
+ * STILL = device đang đứng yên (Google ML model phân loại). Dùng để chọn
+ * cell info path (cached vs fresh) — đứng yên không cần ép modem scan.
  */
 function isStill(): boolean {
-  // Buffer rỗng = headless mode sau process kill (accelerometer chưa subscribe).
-  // Không có data → không biết trạng thái → assume still (conservative).
-  if (accelBuffer.length < 10) return true;
-  const n = accelBuffer.length;
-  let sum = 0;
-  for (let i = 0; i < n; i++) sum += accelBuffer[i];
-  const mean = sum / n;
-  let varSum = 0;
-  for (let i = 0; i < n; i++) {
-    const diff = accelBuffer[i] - mean;
-    varSum += diff * diff;
-  }
-  const variance = varSum / n;
-  return variance < STILL_VARIANCE_THRESHOLD;
+  return getCurrentActivity() === 'STILL';
 }
 
 /**
@@ -238,12 +207,16 @@ async function readBatteryLevel(): Promise<number | undefined> {
 }
 
 /**
- * Build buffer ready để gửi — drop fix quá cũ, áp movement gate. Trả về
- * `{ toSend, remaining }` nếu nên gửi /ingest có locations; `null` nếu nên
- * gửi heartbeat-only (đứng yên / chưa di chuyển đủ / buffer rỗng).
+ * Build buffer ready để gửi. KHÔNG còn movement gate — OS đã filter bằng
+ * distanceInterval (adaptive theo activity). Buffer chỉ còn dùng cho:
+ *  - Retry khi network fail
+ *  - Drop fix quá cũ (>30 phút) sau crash/restart
+ *  - Decouple sample (OS-driven) vs send (NativeIngest)
+ *
+ * Trả null nếu buffer rỗng (→ task chỉ gửi heartbeat).
  */
 async function prepareIngest(
-  force: boolean,
+  _force: boolean,
 ): Promise<{ toSend: LocationData[]; remaining: LocationData[] } | null> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
   if (!raw) return null;
@@ -258,35 +231,6 @@ async function prepareIngest(
     buffer = filtered;
   }
   if (buffer.length === 0) return null;
-
-  const latest = buffer[buffer.length - 1];
-  if (!force) {
-    const last = await getLastSent();
-    const threshold = isStill() ? MOVEMENT_STILL_THRESHOLD_M : MOVEMENT_THRESHOLD_M;
-    if (last) {
-      const rawDistance = haversineMeters(
-        latest.latitude,
-        latest.longitude,
-        last.lat,
-        last.lon,
-      );
-      // Trừ sai số GPS của 2 điểm trước khi so threshold. Dùng max (không sum)
-      // để tránh threshold thổi phồng quá lớn — sum cho GPS-grade (20m + 20m)
-      // yêu cầu di chuyển 45m mới gửi, quá chặt cho tracking thực tế.
-      // Cap ở ACCURACY_GPS_GRADE_M: fix approx/network (>20m) không được inflate
-      // threshold vượt quá mức cần thiết.
-      const accLatest = Math.min(
-        latest.accuracy ?? ACCURACY_GPS_GRADE_M,
-        ACCURACY_GPS_GRADE_M,
-      );
-      const accLast = Math.min(
-        last.acc ?? ACCURACY_GPS_GRADE_M,
-        ACCURACY_GPS_GRADE_M,
-      );
-      const effectiveDistance = rawDistance - Math.max(accLatest, accLast);
-      if (effectiveDistance < threshold) return null;
-    }
-  }
   return {
     toSend: buffer.slice(0, FLUSH_BATCH_LIMIT),
     remaining: buffer.slice(FLUSH_BATCH_LIMIT),
@@ -320,17 +264,25 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
 
   const batteryLevel = await readBatteryLevel();
   const cellTowers = await getCachedCells();
+  const activity = getCurrentActivity();
+  const activityConfidence = getCurrentConfidence();
   const payload: {
     locations?: LocationData[];
     cellTowers?: typeof cellTowers;
     batteryLevel?: number;
     lastFixAt?: number;
+    activity?: Activity;
+    activityConfidence?: number;
   } = {
     cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
     batteryLevel,
   };
   if (hasLocations) payload.locations = ingest!.toSend;
   if (lastFixTime != null) payload.lastFixAt = lastFixTime;
+  if (activity !== 'UNKNOWN') {
+    payload.activity = activity;
+    payload.activityConfidence = activityConfidence;
+  }
 
   let success: boolean;
 
@@ -620,12 +572,16 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   console.log('[fg-location] sendTelemetry done');
 });
 
+// Module-level state: distanceInterval đang dùng, để biết khi nào cần
+// re-register Location updates (tránh restart liên tục khi activity vẫn cùng tier).
+let currentDistanceInterval = -1;
+let activityUnsubscribe: (() => void) | null = null;
+
 /**
- * Bật foreground service tracking.
- * - distanceInterval=0: bắt buộc để OS fire theo timeInterval kể cả khi đứng yên.
- * - timeInterval=30s: heartbeat + flush đều đặn. Filter 25m áp ở movement gate.
- * Foreground service với foregroundServiceType=location chỉ cần ACCESS_FINE_LOCATION —
- * expo-location bỏ qua check background permission khi dùng foreground service.
+ * Bật foreground service tracking — event-driven theo distance.
+ * - distanceInterval: adaptive theo activity (5m walking → 25m vehicle)
+ * - timeInterval: 60s fallback heartbeat khi đứng yên không trigger distance event
+ * - Khi activity thay đổi → re-register với params mới (qua setOptions native)
  */
 export async function startForegroundLocation(): Promise<{ ok: boolean; reason?: string }> {
   const fg = await Location.getForegroundPermissionsAsync();
@@ -633,31 +589,43 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
     return { ok: false, reason: 'Chưa cấp quyền vị trí' };
   }
 
-  // Bật accelerometer subscription để task có dữ liệu motion detection.
-  // Sub ở module level — TaskManager headless task đọc accelBuffer cùng JS context.
+  // Bật Activity Recognition để adaptive distanceInterval. Có thể fail trên
+  // thiết bị không có Google Play Services — fallback UNKNOWN (10m default).
   try {
-    subscribeAccelerometer();
+    await startActivityRecognition();
   } catch {
-    // Sensor không available trên thiết bị này — movement gate fallback về "moving".
+    // ignore
   }
 
-  // Gọi startLocationUpdatesAsync trực tiếp — không check hasStartedLocationUpdatesAsync
-  // trước vì native xử lý gracefully:
-  //   • Chưa có task → start mới, hiện notification
-  //   • Đã có task → gọi setOptions() (re-register FusedLocationProvider), notification giữ nguyên
-  // Stop trước rồi start lại tạo gap tracking + notification nhấp nháy mỗi lần mở app.
+  if (activityUnsubscribe) {
+    activityUnsubscribe();
+    activityUnsubscribe = null;
+  }
+  activityUnsubscribe = onActivityChange((activity) => {
+    const newDistance = DISTANCE_BY_ACTIVITY[activity];
+    if (newDistance === currentDistanceInterval) return;
+    console.log(`[fg-location] activity=${activity} → distanceInterval=${newDistance}m`);
+    void applyLocationParams(newDistance);
+  });
+
+  return applyLocationParams(
+    DISTANCE_BY_ACTIVITY[getCurrentActivity()],
+  );
+}
+
+/**
+ * Register Location updates với distanceInterval cụ thể. Idempotent —
+ * gọi lại khi đã có task sẽ chỉ setOptions native, không gap tracking.
+ */
+async function applyLocationParams(
+  distanceInterval: number,
+): Promise<{ ok: boolean; reason?: string }> {
   try {
     await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
-      // distanceInterval=0: bắt buộc để task fire theo timeInterval kể cả khi
-      // đứng yên — iOS distanceFilter và Android smallestDisplacement đều chặn
-      // callback nếu >0 và device chưa di chuyển đủ. Heartbeat sẽ bị mất.
-      // Coarse filter 25m được áp ở movement gate (app level) thay vì OS level.
-      distanceInterval: 0,
-      // timeInterval=10s: wake task đều đặn → mượt khi di chuyển nhanh.
-      // Heartbeat throttle (30s/60s) ở app level, gate ingest spam.
-      timeInterval: LOCATION_TIME_INTERVAL_MS,
-      deferredUpdatesInterval: LOCATION_TIME_INTERVAL_MS,
+      distanceInterval,
+      timeInterval: LOCATION_TIME_INTERVAL_MS,  // heartbeat fallback 60s
+      deferredUpdatesInterval: 0,                // không cho OS defer
       showsBackgroundLocationIndicator: true,
       foregroundService: {
         notificationTitle: '📍 Đang giám sát vị trí',
@@ -668,7 +636,8 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
       pausesUpdatesAutomatically: false,
       activityType: Location.ActivityType.OtherNavigation,
     });
-    console.log('[fg-location] startLocationUpdatesAsync OK');
+    currentDistanceInterval = distanceInterval;
+    console.log(`[fg-location] startLocationUpdatesAsync OK distance=${distanceInterval}m`);
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -684,9 +653,14 @@ export async function stopForegroundLocation(): Promise<void> {
   if (running) {
     await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
   }
+  if (activityUnsubscribe) {
+    activityUnsubscribe();
+    activityUnsubscribe = null;
+  }
+  await stopActivityRecognition();
   await clearBuffer();
   await AsyncStorage.removeItem(STORAGE_KEY_LAST_SENT);
   cellCache = null;
   lastFixTime = null;
-  unsubscribeAccelerometer();
+  currentDistanceInterval = -1;
 }

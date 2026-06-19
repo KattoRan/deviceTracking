@@ -1,0 +1,11 @@
+{
+  "name": "activity-recognition",
+  "version": "0.1.0",
+  "description": "Google Play Services ActivityRecognitionClient wrapper — phân loại STILL/WALKING/RUNNING/ON_BICYCLE/IN_VEHICLE",
+  "main": "index.ts",
+  "private": true,
+  "files": ["index.ts", "expo-module.config.json", "android"],
+  "expo": {
+    "platforms": ["android"]
+  }
+}

@@ -54,6 +54,10 @@ export interface DeviceMovedEvent {
    * xác hơn `timestamp` (= server emit time, có thể trùng giữa các fix).
    */
   lastFixAt: number | null;
+  /** Activity Recognition state (Google ML) — null nếu mobile cũ không gửi. */
+  activity: string | null;
+  /** Confidence 0-100 của activity ở trên. */
+  activityConfidence: number | null;
 }
 
 export interface CommandDispatchEvent {

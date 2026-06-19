@@ -1,0 +1,32 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.activityrecognition'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useExpoPublishing()
+
+android {
+  namespace "expo.modules.activityrecognition"
+
+  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 24)
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  // Google Play Services Location chứa ActivityRecognitionClient.
+  // Version pin theo dòng SDK mới nhất stable hỗ trợ Android 14.
+  implementation 'com.google.android.gms:play-services-location:21.3.0'
+}

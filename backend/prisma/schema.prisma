@@ -110,6 +110,11 @@ model location_history {
   //   'network' ≤ 200m  heartbeat only
   quality String? @db.VarChar(16)
 
+  // Activity recognition từ Google ML model (STILL/WALKING/RUNNING/ON_BICYCLE/
+  // IN_VEHICLE). Nullable cho client cũ + khi confidence thấp.
+  activity            String? @db.VarChar(20)
+  activity_confidence Int?    @db.SmallInt
+
   geom Unsupported("geometry(Point,4326)")?
 
   recorded_at DateTime

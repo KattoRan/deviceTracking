@@ -121,6 +121,8 @@ function TrackingPageInner() {
       connectedBts: event.connectedBts,
       spoofingSuspected: event.spoofingSuspected,
       gpsBtsDistanceM: event.gpsBtsDistanceM,
+      activity: event.activity,
+      activityConfidence: event.activityConfidence,
       // `lastFixAt` từ server = mobile's lastFixTime (timestamp fix GPS gần
       // nhất từ OS). Chính xác hơn `event.timestamp` khi mobile gate ingest
       // — đứng yên + GPS hoạt động vẫn refresh được lastGpsAt.

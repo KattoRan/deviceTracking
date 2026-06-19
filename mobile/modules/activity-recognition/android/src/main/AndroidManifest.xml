@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!--
+    ACTIVITY_RECOGNITION: runtime permission từ Android 10 (API 29). Trước đó
+    chỉ là install-time qua com.google.android.gms.permission.ACTIVITY_RECOGNITION.
+    Khai báo cả 2 để cover mọi SDK level. App phải request runtime trên API 29+.
+  -->
+  <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+  <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" />
+
+  <application>
+    <receiver
+      android:name="expo.modules.activityrecognition.ActivityRecognitionReceiver"
+      android:enabled="true"
+      android:exported="false" />
+  </application>
+</manifest>

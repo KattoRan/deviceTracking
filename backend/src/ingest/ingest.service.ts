@@ -229,6 +229,8 @@ export class IngestService {
           spoofingSuspected,
           gpsBtsDistanceM,
           lastFixAt: dto.lastFixAt ?? latest.timestamp,
+          activity: dto.activity ?? null,
+          activityConfidence: dto.activityConfidence ?? null,
         });
         this.markEmitted(deviceId, latest.latitude, latest.longitude);
       }
@@ -241,6 +243,8 @@ export class IngestService {
         dto.batteryLevel,
         device.owner_name,
         device.manager_account_id,
+        dto.activity ?? null,
+        dto.activityConfidence ?? null,
       );
 
       // Geofence eval chỉ với fix tier gps + không nghi spoof — fix
@@ -439,6 +443,8 @@ export class IngestService {
     batteryLevel: number | undefined,
     ownerName: string | null,
     managerAccountId: string,
+    activity: string | null,
+    activityConfidence: number | null,
   ): Promise<void> {
     try {
       // Pre-check battery state to know whether we need to flip alert flags
@@ -479,6 +485,8 @@ export class IngestService {
             longitude: loc.longitude,
             accuracy_m: loc.accuracy ?? null,
             quality: deriveQuality(loc),
+            activity,
+            activity_confidence: activityConfidence,
             recorded_at: new Date(loc.timestamp),
           })),
         });
