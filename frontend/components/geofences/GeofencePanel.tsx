@@ -19,6 +19,7 @@ import type {
   GeofenceListItem,
 } from "@/types/geofence";
 import { cn } from "@/lib/utils";
+import AddressSearch from "./AddressSearch";
 
 export interface DraftGeofence {
   name: string;
@@ -179,7 +180,28 @@ export default function GeofencePanel({
           <div className="space-y-4 px-4 py-4">
             {isCreating && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Bấm vào bản đồ để chọn tâm vùng. Có thể kéo điểm tâm để hiệu chỉnh.
+                Tìm địa chỉ bên dưới, hoặc bấm trực tiếp vào bản đồ để chọn tâm vùng.
+              </div>
+            )}
+
+            {(isCreating || isEditingExisting) && (
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-slate-600">
+                  Tìm địa chỉ
+                </span>
+                <AddressSearch
+                  bias={lat != null && lon != null ? { lat, lon } : undefined}
+                  onPick={(place) =>
+                    patchDraft({
+                      lat: place.lat,
+                      lon: place.lon,
+                      // Nếu chưa đặt tên thì lấy địa chỉ làm gợi ý
+                      ...(draft && !draft.name.trim()
+                        ? { name: place.description.split(",")[0] }
+                        : {}),
+                    })
+                  }
+                />
               </div>
             )}
 
