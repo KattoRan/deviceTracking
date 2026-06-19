@@ -3,16 +3,20 @@
  *
  * Goong tách 2 loại key:
  *   - Maptiles: rendering vector tiles
- *   - Services: Places, Directions, Geocoding
- * Một số tài khoản dùng chung 1 key. Ưu tiên `NEXT_PUBLIC_GOONG_API_KEY`
- * (services), fallback về `NEXT_PUBLIC_GOONG_MAPTILES_KEY` nếu chưa khai báo
- * riêng. User cấu hình trong `.env` cho frontend.
+ *   - Services: Places, Directions, Geocoding (cái này)
+ *
+ * Services API CHỈ chấp nhận Services key. Dùng Maptiles key sẽ bị 403
+ * "REQUEST_DENIED". User phải khai báo `NEXT_PUBLIC_GOONG_API_KEY` riêng
+ * trong `.env` của frontend.
  */
 
-const GOONG_API_KEY =
-  process.env.NEXT_PUBLIC_GOONG_API_KEY ??
-  process.env.NEXT_PUBLIC_GOONG_MAPTILES_KEY ??
-  "";
+const GOONG_API_KEY = process.env.NEXT_PUBLIC_GOONG_API_KEY ?? "";
+
+if (typeof window !== "undefined" && !GOONG_API_KEY) {
+  console.warn(
+    "[goong] NEXT_PUBLIC_GOONG_API_KEY chưa cấu hình — Place Autocomplete sẽ fail.",
+  );
+}
 
 const GOONG_BASE = "https://rsapi.goong.io";
 
