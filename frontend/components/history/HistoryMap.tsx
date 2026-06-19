@@ -27,6 +27,11 @@ const WAYPOINT_BUDGET = 200;
 // B→C khi user chuyển vùng giữa 2 lần bật theo dõi.
 const SEGMENT_GAP_MS = 5 * 60 * 1000;
 
+// Stationary pause: gap thời gian 2-5 phút giữa 2 fix liên tiếp = user đứng
+// yên 1 chỗ (mobile event-driven không fire location khi STILL). Render label
+// "Dừng X phút" giữa 2 điểm để bù lại visual gap.
+const STATIONARY_PAUSE_MIN_MS = 2 * 60 * 1000;
+
 const QUALITY_COLORS: Record<"gps" | "approx" | "network", string> = {
   gps: "#16a34a",
   approx: "#f59e0b",
@@ -51,6 +56,44 @@ interface WaypointPopup {
 interface SegmentInfo {
   points: HistoryPoint[];
   startGlobalIdx: number;
+}
+
+interface StationaryPause {
+  lat: number;
+  lon: number;
+  durationMs: number;
+  startTime: string;
+}
+
+function formatDuration(ms: number): string {
+  const totalMin = Math.round(ms / 60_000);
+  if (totalMin < 60) return `${totalMin} phút`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h} giờ` : `${h}h ${m}m`;
+}
+
+/**
+ * Tìm các stationary pauses — đoạn user đứng yên 2-5 phút (giữa 2 fix có
+ * gap thời gian trong khoảng đó, nhưng vẫn cùng segment). Render label tại
+ * trung điểm 2 fix.
+ */
+function detectStationaryPauses(points: HistoryPoint[]): StationaryPause[] {
+  const out: StationaryPause[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const gap = new Date(b.time).getTime() - new Date(a.time).getTime();
+    if (gap >= STATIONARY_PAUSE_MIN_MS && gap < SEGMENT_GAP_MS) {
+      out.push({
+        lat: (a.lat + b.lat) / 2,
+        lon: (a.lon + b.lon) / 2,
+        durationMs: gap,
+        startTime: a.time,
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -90,6 +133,7 @@ export default function HistoryMap({ points }: HistoryMapProps) {
   const [endpointPopup, setEndpointPopup] = useState<EndpointPopup | null>(null);
 
   const segments = useMemo(() => splitIntoSegments(points), [points]);
+  const stationaryPauses = useMemo(() => detectStationaryPauses(points), [points]);
 
   // GeoJSON: mỗi segment 1 LineString — MapLibre vẽ tách bạch, không nối qua
   // gap. Dùng FeatureCollection với nhiều features hơn MultiLineString để
@@ -310,6 +354,35 @@ export default function HistoryMap({ points }: HistoryMapProps) {
           );
         })}
 
+        {/* Stationary pause labels — đoạn user đứng yên 2-5 phút */}
+        {stationaryPauses.map((p, i) => (
+          <MapMarker
+            key={`pause-${i}`}
+            longitude={p.lon}
+            latitude={p.lat}
+            anchor="center"
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 8px",
+                borderRadius: 12,
+                background: "rgba(148, 163, 184, 0.95)",
+                color: "white",
+                fontSize: 11,
+                fontWeight: 600,
+                boxShadow: "0 1px 3px rgba(15,23,42,0.3)",
+                whiteSpace: "nowrap",
+              }}
+              title={`Dừng ${formatDuration(p.durationMs)} từ ${new Date(p.startTime).toLocaleTimeString("vi-VN")}`}
+            >
+              ⏸ {formatDuration(p.durationMs)}
+            </div>
+          </MapMarker>
+        ))}
+
         {endpointPopup && (
           <Popup
             longitude={endpointPopup.point.lon}
@@ -380,9 +453,20 @@ export default function HistoryMap({ points }: HistoryMapProps) {
             <span className="inline-block h-1 w-5 rounded" style={{ background: "#16a34a" }} />
             <span className="text-slate-600">Đường đi</span>
           </div>
-          {segments.length > 1 && (
+          {stationaryPauses.length > 0 && (
+            <div className="mt-1 flex items-center gap-2">
+              <span className="rounded-full bg-slate-400 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                ⏸
+              </span>
+              <span className="text-slate-600">Dừng tại đây</span>
+            </div>
+          )}
+          {(segments.length > 1 || stationaryPauses.length > 0) && (
             <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-[10px] text-slate-500">
-              {segments.length} chặng (gap &gt; 5 phút bị tách)
+              {segments.length > 1 && `${segments.length} chặng`}
+              {segments.length > 1 && stationaryPauses.length > 0 && " · "}
+              {stationaryPauses.length > 0 &&
+                `${stationaryPauses.length} điểm dừng`}
             </div>
           )}
         </div>

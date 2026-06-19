@@ -1,6 +1,7 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import ActivityRecognition, {
   type ActivityResult,
+  type ActivityTransitionEvent,
   type ActivityType,
 } from 'activity-recognition';
 
@@ -44,9 +45,23 @@ const MIN_CONFIDENCE = 60; // chỉ tin activity nếu ML model confident ≥ 60
 
 let currentActivity: Activity = 'UNKNOWN';
 let currentConfidence = 0;
-let subscription: { remove(): void } | null = null;
+let periodicSub: { remove(): void } | null = null;
+let transitionSub: { remove(): void } | null = null;
 type Listener = (activity: Activity, confidence: number) => void;
 const listeners = new Set<Listener>();
+
+function applyActivity(next: Activity, confidence: number): void {
+  if (next === currentActivity && confidence === currentConfidence) return;
+  currentActivity = next;
+  currentConfidence = confidence;
+  for (const cb of listeners) {
+    try {
+      cb(next, confidence);
+    } catch {
+      // listeners must not throw
+    }
+  }
+}
 
 async function ensurePermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
@@ -72,29 +87,27 @@ export async function startActivityRecognition(): Promise<boolean> {
   const ok = await ensurePermission();
   if (!ok) return false;
 
-  if (subscription) return true; // idempotent
+  if (periodicSub || transitionSub) return true; // idempotent
 
-  subscription = ActivityRecognition.addListener('activity', (e: ActivityResult) => {
-    const normalized = normalize(e.activity);
-    // Bỏ qua event confidence thấp — Google đôi khi đoán mò khi thiếu data,
-    // giữ activity cũ ổn định hơn.
+  // Periodic — confidence-based, có dữ liệu cho UI hiển thị + fallback.
+  periodicSub = ActivityRecognition.addListener('activity', (e: ActivityResult) => {
     if (e.confidence < MIN_CONFIDENCE) return;
-    if (normalized === currentActivity && e.confidence === currentConfidence) {
-      return;
-    }
-    currentActivity = normalized;
-    currentConfidence = e.confidence;
-    for (const cb of listeners) {
-      try {
-        cb(normalized, e.confidence);
-      } catch {
-        // listeners must not throw
-      }
-    }
+    applyActivity(normalize(e.activity), e.confidence);
   });
+
+  // Transitions — event-driven, fire NGAY khi user chuyển state. Critical
+  // để bắt STILL→MOVING kịp thời (vài giây thay vì 30-60s periodic lag).
+  transitionSub = ActivityRecognition.addListener(
+    'transition',
+    (e: ActivityTransitionEvent) => {
+      // Transition luôn là high-confidence event từ ML model.
+      applyActivity(normalize(e.activity), 100);
+    },
+  );
 
   try {
     await ActivityRecognition.start(UPDATE_INTERVAL_MS);
+    await ActivityRecognition.startTransitions();
     return true;
   } catch {
     return false;
@@ -102,9 +115,13 @@ export async function startActivityRecognition(): Promise<boolean> {
 }
 
 export async function stopActivityRecognition(): Promise<void> {
-  if (subscription) {
-    subscription.remove();
-    subscription = null;
+  if (periodicSub) {
+    periodicSub.remove();
+    periodicSub = null;
+  }
+  if (transitionSub) {
+    transitionSub.remove();
+    transitionSub = null;
   }
   if (ActivityRecognition) {
     try {

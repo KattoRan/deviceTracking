@@ -306,6 +306,62 @@ export class IngestService {
       data: updateData,
     });
 
+    // Spoof check trên heartbeat: nếu có connectedBts + fix GPS gps-tier gần
+    // đây (5 phút) trong location_history, check khoảng cách. Cần thiết vì
+    // khi user đứng yên + fake GPS thì ingest path không fire, spoof không
+    // được phát hiện cho đến khi user di chuyển trong fake location.
+    if (connectedBts) {
+      const recentGpsCutoff = new Date(Date.now() - 5 * 60 * 1000);
+      const recentFix = await this.prisma.location_history.findFirst({
+        where: {
+          device_id: deviceId,
+          quality: 'gps',
+          recorded_at: { gte: recentGpsCutoff },
+        },
+        orderBy: { recorded_at: 'desc' },
+        select: { latitude: true, longitude: true },
+      });
+      if (recentFix) {
+        const SPOOF_RANGE_MULTIPLIER = 2;
+        const DEFAULT_BTS_RANGE_M = 2000;
+        const dist = Math.round(
+          haversineMeters(
+            Number(recentFix.latitude),
+            Number(recentFix.longitude),
+            connectedBts.lat,
+            connectedBts.lon,
+          ),
+        );
+        const btsRange = connectedBts.range ?? DEFAULT_BTS_RANGE_M;
+        if (dist > btsRange * SPOOF_RANGE_MULTIPLIER) {
+          this.logger.warn(
+            `GPS SPOOFING suspected (heartbeat) device=${deviceId} ` +
+              `last_gps=(${recentFix.latitude},${recentFix.longitude}) ` +
+              `bts=(${connectedBts.lat},${connectedBts.lon}) ` +
+              `dist=${dist}m range=${btsRange}m`,
+          );
+          this.eventsGateway.emitDeviceMoved({
+            deviceId,
+            lat: Number(recentFix.latitude),
+            lon: Number(recentFix.longitude),
+            accuracy: null,
+            quality: 'gps',
+            cid: servingCell?.cid ?? null,
+            lac: servingCell?.lac ?? null,
+            signalDbm: servingCell?.signalDbm ?? null,
+            timestamp: now.toISOString(),
+            cellTowers: cellTowersPayload,
+            connectedBts,
+            spoofingSuspected: true,
+            gpsBtsDistanceM: dist,
+            lastFixAt: dto.lastFixAt ?? null,
+            activity: dto.activity ?? null,
+            activityConfidence: dto.activityConfidence ?? null,
+          });
+        }
+      }
+    }
+
     this.eventsGateway.emitDeviceHeartbeat({
       deviceId,
       batteryLevel: batteryLevel ?? null,

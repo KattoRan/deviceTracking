@@ -12,5 +12,9 @@
       android:name="expo.modules.activityrecognition.ActivityRecognitionReceiver"
       android:enabled="true"
       android:exported="false" />
+    <receiver
+      android:name="expo.modules.activityrecognition.ActivityTransitionReceiver"
+      android:enabled="true"
+      android:exported="false" />
   </application>
 </manifest>

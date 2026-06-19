@@ -9,6 +9,9 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionResult
+import com.google.android.gms.location.ActivityTransition
+import com.google.android.gms.location.ActivityTransitionRequest
+import com.google.android.gms.location.ActivityTransitionResult
 import com.google.android.gms.location.DetectedActivity
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
@@ -41,11 +44,12 @@ class ActivityRecognitionModule : Module() {
   }
 
   private var pendingIntent: PendingIntent? = null
+  private var transitionPendingIntent: PendingIntent? = null
 
   override fun definition() = ModuleDefinition {
     Name("ActivityRecognitionModule")
 
-    Events("activity")
+    Events("activity", "transition")
 
     OnCreate {
       instance = this@ActivityRecognitionModule
@@ -90,22 +94,81 @@ class ActivityRecognitionModule : Module() {
 
     AsyncFunction("stop") { promise: Promise ->
       val context = appContext.reactContext
-      val pi = pendingIntent
-      if (context == null || pi == null) {
+      if (context == null) {
         promise.resolve(null)
         return@AsyncFunction
       }
       try {
         val client = ActivityRecognition.getClient(context)
-        client.removeActivityUpdates(pi)
-          .addOnSuccessListener {
-            pi.cancel()
-            pendingIntent = null
-            promise.resolve(null)
-          }
-          .addOnFailureListener { e -> promise.reject("STOP_FAILED", e.message ?: "unknown", e) }
+        val pi = pendingIntent
+        if (pi != null) {
+          client.removeActivityUpdates(pi)
+          pi.cancel()
+          pendingIntent = null
+        }
+        val tpi = transitionPendingIntent
+        if (tpi != null) {
+          client.removeActivityTransitionUpdates(tpi)
+          tpi.cancel()
+          transitionPendingIntent = null
+        }
+        promise.resolve(null)
       } catch (e: Exception) {
         promise.reject("STOP_ERROR", e.message ?: "unknown", e)
+      }
+    }
+
+    /**
+     * Subscribe activity transitions — fire NGAY khi ENTER/EXIT 1 trong các
+     * activity được monitor (STILL, WALKING, RUNNING, ON_BICYCLE, IN_VEHICLE).
+     * Khác với requestActivityUpdates (periodic, 60s), transitions là event-
+     * driven thuần → bắt được STILL→MOVING trong vài giây thay vì chờ chu kỳ.
+     */
+    AsyncFunction("startTransitions") { promise: Promise ->
+      val context = appContext.reactContext
+      if (context == null) {
+        promise.reject("NO_CONTEXT", "React context lost", null)
+        return@AsyncFunction
+      }
+      if (!hasActivityPermission(context)) {
+        promise.reject("PERMISSION_DENIED", "ACTIVITY_RECOGNITION permission not granted", null)
+        return@AsyncFunction
+      }
+
+      try {
+        val transitions = buildList {
+          for (type in listOf(
+            DetectedActivity.STILL,
+            DetectedActivity.WALKING,
+            DetectedActivity.RUNNING,
+            DetectedActivity.ON_BICYCLE,
+            DetectedActivity.IN_VEHICLE,
+          )) {
+            add(
+              ActivityTransition.Builder()
+                .setActivityType(type)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build()
+            )
+          }
+        }
+        val request = ActivityTransitionRequest(transitions)
+
+        val intent = Intent(context, ActivityTransitionReceiver::class.java)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        } else {
+          PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pi = PendingIntent.getBroadcast(context, 1, intent, flags)
+        transitionPendingIntent = pi
+
+        val client = ActivityRecognition.getClient(context)
+        client.requestActivityTransitionUpdates(request, pi)
+          .addOnSuccessListener { promise.resolve(null) }
+          .addOnFailureListener { e -> promise.reject("REQUEST_FAILED", e.message ?: "unknown", e) }
+      } catch (e: Exception) {
+        promise.reject("START_TRANSITIONS_ERROR", e.message ?: "unknown", e)
       }
     }
 

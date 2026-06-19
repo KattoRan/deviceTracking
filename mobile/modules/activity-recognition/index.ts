@@ -22,14 +22,27 @@ export interface ActivityResult {
   timestamp: number;
 }
 
+export interface ActivityTransitionEvent {
+  activity: ActivityType;
+  transition: 'ENTER';
+  elapsedRealTimeNanos: number;
+}
+
 export type ActivityRecognitionEvents = {
   activity(event: ActivityResult): void;
+  transition(event: ActivityTransitionEvent): void;
 };
 
 declare class ActivityRecognitionNativeModule extends NativeModule<ActivityRecognitionEvents> {
-  /** Subscribe activity updates. Interval ms (60_000 = 60s khuyến nghị). */
+  /** Subscribe activity updates periodic (60s). Confidence-based, có TILTING etc. */
   start(intervalMs: number): Promise<void>;
-  /** Unsubscribe + huỷ pending intents. */
+  /**
+   * Subscribe transitions — fire NGAY khi user ENTER 1 activity mới
+   * (STILL/WALKING/RUNNING/ON_BICYCLE/IN_VEHICLE). Event-driven thuần, không
+   * có lag periodic. Dùng để adaptive distanceInterval kịp thời.
+   */
+  startTransitions(): Promise<void>;
+  /** Unsubscribe cả periodic + transitions, huỷ pending intents. */
   stop(): Promise<void>;
   /** Trả activity gần nhất đã cache, null nếu chưa có. */
   getLastActivity(): Promise<ActivityResult | null>;

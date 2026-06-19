@@ -42,7 +42,12 @@ const FLUSH_BATCH_LIMIT = 50;
 // - Activity Recognition (Google ML) classify STILL/WALKING/RUNNING/BICYCLE/VEHICLE,
 //   ở mỗi lần đổi state ta reschedule Location updates với distanceInterval phù hợp.
 // - Movement gate app-level đã bỏ — OS đảm nhiệm filter distance.
-const LOCATION_TIME_INTERVAL_MS = 60_000;  // heartbeat fallback khi không di chuyển
+//
+// timeInterval=30s: giúp GPS chip stay "warm" khi STILL — không cold-start
+// 5-10s khi user bắt đầu di chuyển. Trade-off: heartbeat dày hơn (120/h thay
+// vì 60/h khi đứng yên 1h) → tăng nhẹ pin nhưng đảm bảo fix đầu sau STILL
+// chính xác sớm.
+const LOCATION_TIME_INTERVAL_MS = 30_000;
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
 // distanceInterval (m) theo activity. STILL không filter distance (chỉ heartbeat
