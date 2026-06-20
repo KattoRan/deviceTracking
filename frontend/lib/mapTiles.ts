@@ -6,9 +6,6 @@
  * Trường Sa đầy đủ thuộc chủ quyền Việt Nam, chi tiết đường/ngõ tốt hơn
  * OSM/CARTO mặc định.
  *
- * Goong chỉ phục vụ vector tile (Mapbox/MapLibre GL style), không có raster
- * PNG. Vì vậy app đã chuyển hoàn toàn sang MapLibre GL JS, bỏ Leaflet.
- *
  * Maptiles key được expose ra browser (NEXT_PUBLIC_) — đây là thiết kế của
  * Goong; cần restrict origin trong Goong dashboard cho từng môi trường.
  */

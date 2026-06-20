@@ -62,7 +62,6 @@ interface ControlBtnProps {
   onClick: () => void;
   activeColor: string;
   activeBg: string;
-  disabled?: boolean;
 }
 
 function ControlBtn({
@@ -72,13 +71,11 @@ function ControlBtn({
   onClick,
   activeColor,
   activeBg,
-  disabled = false,
 }: ControlBtnProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
       title={label}
       aria-pressed={active}
       className={cn(
@@ -86,7 +83,6 @@ function ControlBtn({
         active
           ? `${activeBg} ${activeColor}`
           : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900",
-        disabled && "cursor-not-allowed opacity-40",
       )}
     >
       <Icon className="h-3.5 w-3.5" />

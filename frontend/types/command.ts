@@ -5,12 +5,12 @@ export type CommandName =
 
 export type CommandStatus = "pending" | "delivered" | "executed" | "failed";
 
-export interface RingAlarmPayload {
+interface RingAlarmPayload {
   durationSec?: number;
   volume?: number;
 }
 
-export interface LockDevicePayload {
+interface LockDevicePayload {
   message?: string;
 }
 

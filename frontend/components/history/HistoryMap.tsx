@@ -16,6 +16,7 @@ import {
 import type { FeatureCollection, LineString, Point } from "geojson";
 import type { MapLayerMouseEvent } from "maplibre-gl";
 import { GOONG_ATTRIBUTION, GOONG_STYLE_URL, hidePoiLayers } from "@/lib/mapTiles";
+import { formatDuration } from "@/lib/utils";
 import type { HistoryPoint, LocationQuality } from "@/types/device";
 
 const HANOI_CENTER = { longitude: 105.8542, latitude: 21.0285, zoom: 12 };
@@ -65,13 +66,6 @@ interface StationaryPause {
   startTime: string;
 }
 
-function formatDuration(ms: number): string {
-  const totalMin = Math.round(ms / 60_000);
-  if (totalMin < 60) return `${totalMin} phút`;
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return m === 0 ? `${h} giờ` : `${h}h ${m}m`;
-}
 
 /**
  * Tìm các stationary pauses — đoạn user đứng yên 2-5 phút (giữa 2 fix có

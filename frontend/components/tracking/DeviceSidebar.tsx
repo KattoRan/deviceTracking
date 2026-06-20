@@ -10,7 +10,7 @@ import {
   Smartphone,
   X,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatDistanceToNow } from "@/lib/utils";
 import type { Device } from "@/types/device";
 
 type StatusFilter = "all" | "online" | "offline";
@@ -281,7 +281,7 @@ function DeviceItem({
           </p>
           {device.last_seen && (
             <p className="mt-1 text-[10px] text-slate-400">
-              {formatLastSeen(device.last_seen)}
+              {formatDistanceToNow(new Date(device.last_seen))}
             </p>
           )}
         </div>
@@ -290,12 +290,3 @@ function DeviceItem({
   );
 }
 
-function formatLastSeen(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "Vừa xong";
-  if (mins < 60) return `${mins} phút trước`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  return `${Math.floor(hours / 24)} ngày trước`;
-}

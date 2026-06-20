@@ -19,26 +19,11 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import deviceService from "@/services/deviceService";
 import type { Device, DeviceDetail } from "@/types/device";
-import { cn } from "@/lib/utils";
+import { cn, formatCoord, formatDateTime } from "@/lib/utils";
 
 type StatusFilter = "all" | "online" | "offline";
 
 const PAGE_SIZE = 10;
-
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "--";
-  return new Date(iso).toLocaleString("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatCoord(val: number | null | undefined): string {
-  return val == null ? "--" : val.toFixed(6);
-}
 
 export default function ManageDevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);

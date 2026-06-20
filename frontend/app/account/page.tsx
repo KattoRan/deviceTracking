@@ -80,7 +80,7 @@ export default function AccountPage() {
           Tài khoản
         </h1>
         <p className="text-sm text-slate-600">
-          Thông tin tài khoản phụ huynh & số điện thoại liên lạc
+          Thông tin tài khoản người quản lý & số điện thoại liên lạc
         </p>
       </header>
 
@@ -151,9 +151,9 @@ export default function AccountPage() {
         <div className="mt-4 flex items-start gap-2 text-sm text-emerald-900">
           <Smartphone className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <p>
-            Khi cài app trên điện thoại trẻ em / người già, nhập code này để
+            Khi cài app trên thiết bị di động, nhập code này để
             thiết bị tự gắn vào tài khoản. Code dùng nhiều lần — chia sẻ với
-            người thân an toàn.
+            người dùng thiết bị an toàn.
           </p>
         </div>
       </section>
@@ -164,7 +164,7 @@ export default function AccountPage() {
           Số điện thoại liên lạc
         </div>
         <p className="mb-4 text-sm text-slate-600">
-          Số này hiển thị trên app của trẻ em / người già để họ gọi về khi cần.
+          Số này hiển thị trên app của người dùng thiết bị để họ gọi về khi cần.
         </p>
         <form onSubmit={handleSavePhone} className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <div className="flex-1">

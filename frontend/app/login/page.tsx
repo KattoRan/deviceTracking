@@ -53,10 +53,10 @@ function LoginForm() {
         </div>
         <div>
           <h1 className="text-xl font-bold tracking-tight text-slate-900">
-            Đăng nhập phụ huynh
+            Đăng nhập người quản lý
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Giám sát người thân của bạn
+            Giám sát thiết bị của bạn
           </p>
         </div>
       </div>
@@ -122,7 +122,7 @@ function LoginForm() {
             href="/register"
             className="font-medium text-emerald-600 hover:text-emerald-700"
           >
-            Đăng ký phụ huynh
+            Đăng ký người quản lý
           </Link>
         </p>
       </form>

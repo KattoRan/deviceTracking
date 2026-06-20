@@ -6,8 +6,8 @@ import type {
   LocationHistory,
 } from "@/types/device";
 
-// Pairing flow đã chuyển sang mobile (POST /devices/pair). Web parent dashboard
-// chỉ tạo pairing code khi register tài khoản, không trực tiếp gọi pair.
+// Pairing flow chạy ở mobile (POST /devices/pair). Web dashboard chỉ tạo
+// pairing code lúc đăng ký tài khoản, không gọi pair trực tiếp.
 
 export const deviceService = {
   getAll: async (): Promise<Device[]> => {

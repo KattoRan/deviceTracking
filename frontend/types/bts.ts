@@ -26,15 +26,3 @@ export interface BtsGeoJson {
   };
 }
 
-export interface BtsDetail {
-  id: number;
-  mcc: number;
-  mnc: number;
-  lac: number;
-  cid: number;
-  lat: string;
-  lon: string;
-  radio: string | null;
-  range: number | null;
-  address: string | null;
-}

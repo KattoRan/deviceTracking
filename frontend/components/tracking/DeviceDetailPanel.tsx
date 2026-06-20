@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { formatCoord, formatDateTime, formatDistance } from "@/lib/utils";
 import deviceService from "@/services/deviceService";
 import type {
   Activity,
@@ -25,6 +26,7 @@ import type {
   Device,
   DeviceDetail,
 } from "@/types/device";
+import RemoteControlPanel from "./RemoteControlPanel";
 
 const ACTIVITY_LABEL: Record<Activity, string> = {
   STILL: "Đứng yên",
@@ -43,7 +45,6 @@ const ACTIVITY_ICON: Record<Activity, string> = {
   IN_VEHICLE: "🚗",
   UNKNOWN: "❓",
 };
-import RemoteControlPanel from "./RemoteControlPanel";
 
 interface DeviceDetailPanelProps {
   device: Device;
@@ -83,27 +84,6 @@ function SignalBars({ bars }: { bars: number }) {
       ))}
     </div>
   );
-}
-
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "--";
-  return new Date(iso).toLocaleString("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function formatCoord(val: number | null | undefined): string {
-  return val == null ? "--" : val.toFixed(6);
-}
-
-function formatDistance(m: number | null): string {
-  if (m == null) return "--";
-  return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m} m`;
 }
 
 export default function DeviceDetailPanel({

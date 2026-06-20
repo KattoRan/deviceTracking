@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "deviceTracking",
-  description: "Giám sát vị trí trẻ em và người già qua GPS và trạm BTS",
+  description: "Giám sát vị trí thiết bị di động qua GPS và trạm BTS",
 };
 
 export const viewport: Viewport = {

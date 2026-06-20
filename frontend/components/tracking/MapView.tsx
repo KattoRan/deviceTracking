@@ -22,7 +22,7 @@ import type { Device } from "@/types/device";
 import type { GeofenceListItem } from "@/types/geofence";
 
 const MOVE_DEBOUNCE_MS = 300;
-// MapLibre dùng [lon, lat] khác Leaflet [lat, lon] — audit kỹ mọi chỗ tọa độ.
+// MapLibre coords là [lon, lat] — audit kỹ mọi chỗ tọa độ.
 const HANOI_CENTER = { longitude: 105.8542, latitude: 21.0285, zoom: 12 };
 const INITIAL_FLY_DURATION = 1000;
 
@@ -32,8 +32,7 @@ const STATUS_COLOR: Record<Device["status"], string> = {
 };
 const SPOOF_COLOR = "#dc2626";
 
-// Bán kính phủ sóng default theo công nghệ (m). Khớp giá trị cũ BtsLayer.tsx
-// để hành vi không đổi sau khi chuyển từ Leaflet sang MapLibre.
+// Bán kính phủ sóng default theo công nghệ (m).
 function coverageRadius(props: BtsFeature["properties"]): number {
   if (props.coverageRadius && props.coverageRadius > 0) return props.coverageRadius;
   const tech = (props.radio || "").toUpperCase();
@@ -359,10 +358,10 @@ export default function MapView({
     };
   }, [geoJsonData, selectedBtsId, focusBts]);
 
-  // Coverage auto cho selected device khi đang mất GPS — báo cha mẹ "thiết bị
-  // đâu đó trong vùng phủ trạm này". Re-eval mỗi heartbeat (device prop đổi
-  // → memo re-run) nên trong 30s không có heartbeat thì state có thể stale,
-  // chấp nhận được.
+  // Coverage auto cho selected device khi đang mất GPS — báo người quản lý
+  // "thiết bị đâu đó trong vùng phủ trạm này". Re-eval mỗi heartbeat (device
+  // prop đổi → memo re-run) nên trong 30s không có heartbeat thì state có thể
+  // stale, chấp nhận được.
   const GPS_LOST_THRESHOLD_MS = 60_000;
   const gpsLostCoverage = useMemo<FeatureCollection<Polygon>>(() => {
     if (!selectedDevice?.connectedBts || !selectedDevice.lastGpsAt)
@@ -485,7 +484,7 @@ export default function MapView({
       </Source>
 
       {/* Vùng phủ trạm đang nối khi selected device đang mất GPS — hiện rõ
-          hơn coverage thường để cha mẹ thấy ngay "thiết bị đâu đó trong đây". */}
+          hơn coverage thường để người quản lý thấy ngay "thiết bị đâu đó trong đây". */}
       <Source id="gps-lost-coverage" type="geojson" data={gpsLostCoverage}>
         <Layer
           id="gps-lost-coverage-fill"
@@ -549,8 +548,7 @@ export default function MapView({
         />
       </Source>
 
-      {/* BTS points — render qua <Marker> SVG ăng-ten, tham khảo icon cũ
-          ở BtsLayer.tsx (đã xoá). Connected thì to + cam + glow nhẹ. */}
+      {/* BTS points — render qua <Marker> SVG ăng-ten. Connected thì to + cam + glow nhẹ. */}
       {btsList.map((b) => (
         <MapMarker
           key={`bts-${b.id}`}

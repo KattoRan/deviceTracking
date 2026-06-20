@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { formatDistance, formatDuration } from "@/lib/utils";
 import deviceService from "@/services/deviceService";
 import type { Device, LocationHistory } from "@/types/device";
 
@@ -36,20 +37,6 @@ function toLocalDatetimeStr(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
     d.getHours(),
   )}:${pad(d.getMinutes())}`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms <= 0) return "0 phút";
-  const totalMin = Math.round(ms / 60000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  if (h === 0) return `${m} phút`;
-  return `${h}h ${m}m`;
-}
-
-function formatDistance(m: number): string {
-  if (m < 1000) return `${m} m`;
-  return `${(m / 1000).toFixed(2)} km`;
 }
 
 export default function HistoryPage() {

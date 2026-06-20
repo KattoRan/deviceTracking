@@ -106,15 +106,14 @@ export default function RegisterPage() {
               <Smartphone className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-500" />
               <p>
                 <span className="font-semibold">Cài app deviceTracking</span>{" "}
-                trên điện thoại của trẻ em / người già cần giám sát.
+                trên thiết bị di động cần giám sát.
               </p>
             </div>
             <div className="flex items-start gap-2">
               <Radio className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-500" />
               <p>
                 Mở app, nhập <span className="font-mono font-semibold">{pairingCode}</span>{" "}
-                vào ô <em>Pairing code</em>, chọn loại người (trẻ em / người
-                già) và bấm{" "}
+                vào ô <em>Pairing code</em> và bấm{" "}
                 <span className="font-semibold">Ghép thiết bị</span>.
               </p>
             </div>
@@ -149,10 +148,10 @@ export default function RegisterPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">
-              Đăng ký phụ huynh
+              Đăng ký người quản lý
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              Tạo tài khoản để giám sát người thân
+              Tạo tài khoản để giám sát thiết bị
             </p>
           </div>
         </div>
@@ -199,7 +198,7 @@ export default function RegisterPage() {
 
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium text-slate-700">
-              Tên phụ huynh <span className="text-slate-400">(tuỳ chọn)</span>
+              Tên người quản lý <span className="text-slate-400">(tuỳ chọn)</span>
             </span>
             <div className="relative">
               <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
