@@ -29,12 +29,10 @@ AppState.addEventListener('change', (state) => {
 });
 
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
-const STORAGE_KEY_BUFFER = '@deviceTracking/fgBuffer';
 
 const ACCURACY_GPS_GRADE_M = 20;
 const ACCURACY_APPROX_M = 80;
 const MAX_ACCEPTABLE_ACCURACY_M = 200;
-const FLUSH_BATCH_LIMIT = 50;
 
 // H1 — Event-driven sampling theo activity:
 // - OS fire task khi di chuyển đủ distanceInterval (theo activity hiện tại),
@@ -73,12 +71,6 @@ const CELL_CACHE_TTL_MS = 15_000;
 // Heartbeat throttle khác nhau theo activity — STILL chỉ cần refresh last_seen
 // mỗi 60s, MOVING cần dense hơn để admin map mượt.
 const HEARTBEAT_STILL_MS = 60_000;
-
-// Buffer tồn tại trong AsyncStorage qua mọi lần restart. Drop fix quá cũ
-// trước khi flush — fix offline > 30 phút không còn ý nghĩa realtime, đẩy
-// về server chỉ làm rác history (vd sau khi admin reset data + user mở app
-// lại từ session cũ).
-const BUFFER_MAX_AGE_MS = 30 * 60 * 1000;
 
 function classifyQuality(accuracy: number | null | undefined): LocationQuality {
   if (accuracy == null) return 'network';
@@ -150,28 +142,6 @@ async function loadStoredDeviceId(): Promise<string | null> {
   }
 }
 
-async function appendBuffer(fixes: LocationData[]): Promise<void> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
-  const existing: LocationData[] = raw ? (JSON.parse(raw) as LocationData[]) : [];
-  // Dedup theo timestamp — Android 14 (đặc biệt khi battery save) đôi khi
-  // ignore `timeInterval` và deliver same fix nhiều lần với cùng `loc.timestamp`.
-  // Không dedup sẽ làm buffer phình lên 50 entries identical → server insert
-  // 50 row hệt nhau mỗi flush.
-  const merged: LocationData[] = [...existing];
-  for (const f of fixes) {
-    const last = merged[merged.length - 1];
-    if (last && last.timestamp === f.timestamp) continue;
-    merged.push(f);
-  }
-  // Cap 500 điểm — nếu offline lâu thì giữ những điểm gần nhất.
-  const capped = merged.slice(-500);
-  await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(capped));
-}
-
-async function clearBuffer(): Promise<void> {
-  await AsyncStorage.removeItem(STORAGE_KEY_BUFFER);
-}
-
 async function readBatteryLevel(): Promise<number | undefined> {
   try {
     const lvl = await Battery.getBatteryLevelAsync();
@@ -182,55 +152,23 @@ async function readBatteryLevel(): Promise<number | undefined> {
 }
 
 /**
- * Build buffer ready để gửi. KHÔNG còn movement gate — OS đã filter bằng
- * distanceInterval (adaptive theo activity). Buffer chỉ còn dùng cho:
- *  - Retry khi network fail
- *  - Drop fix quá cũ (>30 phút) sau crash/restart
- *  - Decouple sample (OS-driven) vs send (NativeIngest)
+ * Send telemetry — MQTT-first, HTTP fallback. Stateless: fix nào nhận được
+ * từ OS sẽ gửi luôn, không buffer/retry. Send fail = drop fix (chấp nhận lỗ
+ * history khi blip; lần task fire tiếp theo bù lại realtime).
  *
- * Trả null nếu buffer rỗng (→ task chỉ gửi heartbeat).
+ * Heartbeat-only (fixes rỗng) bị throttle 30s MOVING / 60s STILL để không
+ * spam khi GPS lỗi tạm thời.
  */
-async function prepareIngest(): Promise<{
-  toSend: LocationData[];
-  remaining: LocationData[];
-} | null> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
-  if (!raw) return null;
-  let buffer: LocationData[] = JSON.parse(raw);
-  // Drop fix quá cũ — tránh push rác lên server khi user mở app lại từ
-  // session cũ hoặc sau khi admin reset data.
-  const cutoff = Date.now() - BUFFER_MAX_AGE_MS;
-  const filtered = buffer.filter((f) => f.timestamp >= cutoff);
-  if (filtered.length !== buffer.length) {
-    if (filtered.length === 0) await clearBuffer();
-    else await AsyncStorage.setItem(STORAGE_KEY_BUFFER, JSON.stringify(filtered));
-    buffer = filtered;
-  }
-  if (buffer.length === 0) return null;
-  return {
-    toSend: buffer.slice(0, FLUSH_BATCH_LIMIT),
-    remaining: buffer.slice(FLUSH_BATCH_LIMIT),
-  };
-}
+async function sendTelemetry(
+  deviceId: string,
+  fixes: LocationData[],
+): Promise<void> {
+  const hasLocations = fixes.length > 0;
+  console.log(`[fg-location] sendTelemetry entered hasLoc=${hasLocations} fg=${isAppForeground}`);
 
-/**
- * Send telemetry — unified path cho cả ingest (có locations) và heartbeat
- * (không locations). MQTT-first, HTTP fallback. `lastFixAt` luôn gửi nếu có
- * → FE biết "GPS có hoạt động" chính xác kể cả khi mobile gate ingest.
- *
- * Heartbeat throttle: chỉ gửi heartbeat-only nếu lần send trước cách đây
- * >= 30s (MOVING) hoặc >= 60s (STILL). Ingest (có locations) luôn gửi.
- */
-async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
-  const ingest = await prepareIngest();
-  const hasLocations = ingest !== null;
-  console.log(`[fg-location] sendTelemetry entered hasLoc=${hasLocations} force=${force} fg=${isAppForeground}`);
-
-  // Heartbeat-only path bị throttle để không spam khi tick admin = 5s.
-  if (!hasLocations && !force) {
+  if (!hasLocations) {
     const throttle = isStill() ? HEARTBEAT_STILL_MS : HEARTBEAT_MIN_INTERVAL_MS;
     const elapsed = lastSentAt > 0 ? Date.now() - lastSentAt : -1;
-    console.log(`[fg-location] heartbeat check elapsed=${elapsed}ms throttle=${throttle}ms`);
     if (lastSentAt > 0 && elapsed < throttle) {
       console.log('[fg-location] heartbeat throttled — skip');
       return;
@@ -252,19 +190,18 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
     cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
     batteryLevel,
   };
-  if (hasLocations) payload.locations = ingest!.toSend;
+  if (hasLocations) payload.locations = fixes;
   if (lastFixTime != null) payload.lastFixAt = lastFixTime;
   if (activity !== 'UNKNOWN') {
     payload.activity = activity;
     payload.activityConfidence = activityConfidence;
   }
 
-  let success: boolean;
+  let success = false;
 
   if (isAppForeground) {
     const mqttUp = isMqttConnected();
     if (!mqttUp) {
-      console.log('[fg-location] foreground: mqtt down, connecting...');
       try { connectMqtt(deviceId); } catch { /* ignore */ }
     }
     console.log(`[fg-location] foreground: sending via ${isMqttConnected() ? 'MQTT' : 'HTTP'} hasLoc=${hasLocations}`);
@@ -284,25 +221,17 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
           },
           10_000,
         );
-        if (res.ok) {
-          success = true;
-          console.log('[fg-location] HTTP fallback OK', res.status);
-        } else {
-          console.warn('[fg-location] HTTP fallback failed', res.status);
-          if (res.status === 404 && hasLocations) await clearBuffer();
-        }
+        if (res.ok) success = true;
+        else console.warn('[fg-location] HTTP fallback failed', res.status);
       } catch (err) {
         console.warn('[fg-location] HTTP fallback error:', err instanceof Error ? err.message : String(err));
       }
-    } else {
-      console.log('[fg-location] MQTT publish OK');
     }
   } else {
     // Background: dùng NativeIngest (HttpURLConnection chạy native thread).
     // RN's OkHttp bridge và MQTT WebSocket đều bị treo trong headless task khi
     // activity pause — Promise không bao giờ resolve. Native module bypass bridge,
     // dùng standard Java SE network stack độc lập với RN runtime.
-    console.log(`[fg-location] background: NativeIngest hasLoc=${hasLocations}`);
     if (NativeIngest) {
       try {
         const status = await NativeIngest.postJson(
@@ -313,35 +242,18 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
         );
         success = status >= 200 && status < 300;
         console.log(`[fg-location] background NativeIngest -> ${status} ${success ? 'OK' : 'fail'}`);
-        if (status === 404 && hasLocations) await clearBuffer();
       } catch (err) {
-        success = false;
         console.warn('[fg-location] background NativeIngest error:', err instanceof Error ? err.message : String(err));
       }
     } else {
-      // Native module chưa link (vd quên rebuild) — fall back về MQTT
-      // fire-and-forget. Không async để task không treo.
+      // Native module chưa link (vd quên rebuild) — fire-and-forget MQTT.
       const mqttUp = isMqttConnected();
-      console.warn('[fg-location] NativeIngest not linked, falling back to MQTT');
       if (mqttUp) publishTelemetry(deviceId, payload, 0).catch(() => {});
       success = !hasLocations;
     }
   }
 
-  if (!success) return;
-
-  if (hasLocations) {
-    if (ingest!.remaining.length === 0) {
-      await clearBuffer();
-    } else {
-      await AsyncStorage.setItem(
-        STORAGE_KEY_BUFFER,
-        JSON.stringify(ingest!.remaining),
-      );
-    }
-  }
-  // Bump lastSentAt cả ingest lẫn heartbeat để throttle heartbeat kế tiếp.
-  lastSentAt = Date.now();
+  if (success) lastSentAt = Date.now();
 }
 
 interface TaskData {
@@ -367,7 +279,6 @@ interface PendingCommand {
 interface CommandExecutionResult {
   success: boolean;
   error?: string;
-  needFlush?: boolean;
 }
 
 async function executeCommandHeadless(
@@ -375,10 +286,12 @@ async function executeCommandHeadless(
 ): Promise<CommandExecutionResult> {
   try {
     switch (cmd.command) {
-      case 'request_location_now':
-        // Fix mới nhất đã append vào buffer trong cùng task fire. Force-flush
-        // để gửi ngay, không chờ throttle 30s.
-        return { success: true, needFlush: true };
+      case 'request_location_now': {
+        // Lấy fresh fix qua getCurrentPositionAsync + gửi luôn — không phụ
+        // thuộc task fire tiếp theo.
+        const fix = await requestImmediateSend();
+        return { success: fix !== null };
+      }
 
       case 'ring_alarm': {
         const duration = Math.max(
@@ -432,7 +345,6 @@ async function postCommandResult(
   }
 }
 
-/** Trả true nếu có command yêu cầu force flush buffer (vd request_location_now). */
 // AbortController.abort() không cancel được OkHttp trên Android background →
 // dùng Promise.race với timer. Fetch hung sẽ tiếp tục chạy ngầm nhưng task
 // không bị block.
@@ -447,7 +359,7 @@ function fetchWithTimeout(
   return Promise.race([fetch(url, options), timeout]);
 }
 
-async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
+async function pollAndExecuteCommands(deviceId: string): Promise<void> {
   let res: Response;
   try {
     res = await fetchWithTimeout(
@@ -456,27 +368,22 @@ async function pollAndExecuteCommands(deviceId: string): Promise<boolean> {
       5_000,
     );
   } catch {
-    return false;
+    return;
   }
-  if (!res.ok) return false;
+  if (!res.ok) return;
 
   let body: { commands?: PendingCommand[] };
   try {
     body = (await res.json()) as { commands?: PendingCommand[] };
   } catch {
-    return false;
+    return;
   }
 
   const commands = body.commands ?? [];
-  if (commands.length === 0) return false;
-
-  let needFlush = false;
   for (const cmd of commands) {
     const result = await executeCommandHeadless(cmd);
-    if (result.needFlush) needFlush = true;
     await postCommandResult(deviceId, cmd.commandId, result.success, result.error);
   }
-  return needFlush;
 }
 
 /**
@@ -500,11 +407,12 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   const allLocs = payload?.locations ?? [];
   console.log(`[fg-location] locations in payload: ${allLocs.length}, still=${isStill()} lastFixTime=${lastFixTime}`);
 
-  // Buffer TẤT CẢ fix hợp lệ — Android có thể batch nhiều fix trong 1 task wake
-  // (Doze recover, deferredUpdatesInterval gộp). Trước đây chỉ giữ fix cuối →
-  // mất các điểm trung gian → history nhảy điểm khi di chuyển nhanh.
-  const toBuffer: LocationData[] = [];
+  // Parse + filter trong cùng pass. Dedup same-timestamp (Android 14 đôi khi
+  // deliver identical fix trong cùng batch khi battery save). Gửi luôn, không
+  // buffer — fail thì drop, lần task fire kế bù lại realtime.
+  const fixes: LocationData[] = [];
   let droppedAcc = 0;
+  let prevTs: number | null = null;
   for (const loc of allLocs) {
     const acc = loc.coords.accuracy ?? null;
     if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) {
@@ -512,8 +420,10 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
       continue;
     }
     const ts = loc.timestamp ?? Date.now();
+    if (prevTs !== null && ts === prevTs) continue;
+    prevTs = ts;
     if (lastFixTime == null || ts > lastFixTime) lastFixTime = ts;
-    toBuffer.push({
+    fixes.push({
       latitude: loc.coords.latitude,
       longitude: loc.coords.longitude,
       accuracy: acc ?? undefined,
@@ -521,10 +431,9 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
       timestamp: ts,
     });
   }
-  if (toBuffer.length > 0) {
-    await appendBuffer(toBuffer);
-    const last = toBuffer[toBuffer.length - 1];
-    console.log(`[fg-location] buffered ${toBuffer.length} fix(es), latest lat=${last.latitude.toFixed(5)} acc=${last.accuracy?.toFixed(0)}m, dropped(acc)=${droppedAcc}`);
+  if (fixes.length > 0) {
+    const last = fixes[fixes.length - 1];
+    console.log(`[fg-location] ${fixes.length} fix(es), latest lat=${last.latitude.toFixed(5)} acc=${last.accuracy?.toFixed(0)}m, dropped(acc)=${droppedAcc}`);
   } else if (droppedAcc > 0) {
     console.log(`[fg-location] all ${droppedAcc} fix(es) dropped (accuracy > ${MAX_ACCEPTABLE_ACCURACY_M}m)`);
   }
@@ -533,13 +442,10 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
   // đến localhost bị Android block/throttle, setTimeout cũng defer ~51s →
   // task bị block suốt interval. Commands không quan trọng realtime khi
   // background — chờ lần mở app tiếp theo.
-  console.log('[fg-location] calling pollAndExecuteCommands');
-  const force = isAppForeground
-    ? await pollAndExecuteCommands(deviceId)
-    : false;
-  console.log(`[fg-location] poll done force=${force}, calling sendTelemetry`);
-  await sendTelemetry(deviceId, force);
-  console.log('[fg-location] sendTelemetry done');
+  if (isAppForeground) {
+    await pollAndExecuteCommands(deviceId);
+  }
+  await sendTelemetry(deviceId, fixes);
 });
 
 // Module-level state: distanceInterval đang dùng, để biết khi nào cần
@@ -712,7 +618,6 @@ export async function stopForegroundLocation(): Promise<void> {
     activityUnsubscribe = null;
   }
   await stopActivityRecognition();
-  await clearBuffer();
   cellCache = null;
   lastFixTime = null;
   lastSentAt = 0;
