@@ -176,7 +176,7 @@ function HistoryPageInner() {
     const q = deviceSearch.toLowerCase();
     return devices.filter(
       (d) =>
-        (d.name?.toLowerCase() || "").includes(q) ||
+        (d.owner_name?.toLowerCase() || "").includes(q) ||
         (d.phone_number?.includes(q) ?? false) ||
         (d.model?.toLowerCase() || "").includes(q),
     );
@@ -216,8 +216,8 @@ function HistoryPageInner() {
                   >
                     {selectedDevice
                       ? selectedDevice.phone_number
-                        ? `${selectedDevice.name || selectedDevice.phone_number} — ${selectedDevice.phone_number}`
-                        : selectedDevice.name || selectedDevice.id.slice(0, 8)
+                        ? `${selectedDevice.owner_name || selectedDevice.phone_number} — ${selectedDevice.phone_number}`
+                        : selectedDevice.owner_name || selectedDevice.id.slice(0, 8)
                       : "Chọn thiết bị..."}
                   </span>
                   <ChevronDown className="h-4 w-4 text-slate-400" />
@@ -268,7 +268,7 @@ function HistoryPageInner() {
                             />
                             <div className="min-w-0">
                               <div className="truncate font-medium">
-                                {d.name || d.phone_number || d.id.slice(0, 8)}
+                                {d.owner_name || d.phone_number || d.id.slice(0, 8)}
                               </div>
                               <div className="truncate text-xs text-slate-500">
                                 {[d.phone_number, d.model || "Unknown"]

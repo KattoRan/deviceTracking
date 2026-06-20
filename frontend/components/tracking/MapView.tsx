@@ -647,7 +647,7 @@ export default function MapView({
           >
             <button
               type="button"
-              aria-label={d.name || d.phone_number || d.id}
+              aria-label={d.owner_name || d.phone_number || d.id}
               onClick={(e) => {
                 e.stopPropagation();
                 onDeviceClick(d);
@@ -821,7 +821,7 @@ function DevicePopupContent({ device }: { device: Device }) {
   return (
     <div style={{ minWidth: 160, color: "#0f172a" }}>
       <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>
-        {device.name || device.phone_number}
+        {device.owner_name || device.phone_number}
       </div>
       <div style={{ fontSize: 12, marginBottom: 4, color: "#475569" }}>
         Trạng thái:{" "}

@@ -226,7 +226,7 @@ export default function DeviceDetailPanel({
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-900">
-                {device.name || device.phone_number}
+                {device.owner_name || device.phone_number}
               </p>
               <p className="text-xs text-slate-500">
                 {detail?.model || device.model || "--"}

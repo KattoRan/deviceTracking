@@ -173,7 +173,6 @@ model bts_stations {
   geom    Unsupported("geometry(Point,4326)")?
   radio   String?
   range   Int?
-  address String?
   created_at DateTime @default(now()) @db.Timestamp(3)
   updated_at DateTime @default(now()) @updatedAt @db.Timestamp(3)
 

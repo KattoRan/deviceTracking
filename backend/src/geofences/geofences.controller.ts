@@ -16,7 +16,6 @@ import {
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
-  ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
@@ -48,14 +47,14 @@ export class GeofencesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Danh sách vùng giám sát của phụ huynh' })
+  @ApiOperation({ summary: 'Danh sách vùng giám sát của người quản lý' })
   findAll(@Req() req: AuthedRequest): Promise<GeofenceListItem[]> {
     return this.geofencesService.findAll(req.managerAccount.sub);
   }
 
   @Get('breaches/active')
   @ApiOperation({
-    summary: 'Danh sách thiết bị hiện đang ngoài vùng giám sát (của phụ huynh)',
+    summary: 'Danh sách thiết bị hiện đang ngoài vùng giám sát (của người quản lý)',
   })
   listActiveBreaches(@Req() req: AuthedRequest): Promise<GeofenceBreachEvent[]> {
     return this.geofencesService.listActiveBreaches(req.managerAccount.sub);
@@ -72,7 +71,6 @@ export class GeofencesController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Cập nhật tên/tâm/bán kính' })
-  @ApiOkResponse()
   update(
     @Req() req: AuthedRequest,
     @Param('id', new ParseUUIDPipe()) id: string,

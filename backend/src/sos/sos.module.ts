@@ -8,6 +8,5 @@ import { SosService } from './sos.service';
   imports: [AuthModule, EventsModule],
   controllers: [SosController],
   providers: [SosService],
-  exports: [SosService],
 })
 export class SosModule {}

@@ -41,7 +41,7 @@ export class DevicesController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      'Mobile: pair thiết bị mới bằng pairing code phụ huynh cung cấp + thông tin người được giám sát',
+      'Mobile: pair thiết bị mới bằng pairing code người quản lý cung cấp + thông tin người được giám sát',
   })
   @ApiCreatedResponse({ type: PairDeviceResponseDto })
   @ApiUnauthorizedResponse({ description: 'Pairing code không hợp lệ' })
@@ -52,7 +52,7 @@ export class DevicesController {
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Danh sách thiết bị của phụ huynh' })
+  @ApiOperation({ summary: 'Danh sách thiết bị của người quản lý' })
   findAll(@Req() req: AuthedRequest) {
     return this.devicesService.findAll(req.managerAccount.sub);
   }
@@ -93,13 +93,13 @@ export class DevicesController {
   @Get(':id/manager-contact')
   @ApiOperation({
     summary:
-      'Thông tin liên lạc của phụ huynh sở hữu thiết bị (tên + sđt). Dùng để hiển thị trên app mobile.',
+      'Thông tin liên lạc của người quản lý sở hữu thiết bị (tên + sđt). Dùng để hiển thị trên app mobile.',
   })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
-  getParentContact(
+  getManagerContact(
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<{ displayName: string | null; phoneNumber: string | null }> {
-    return this.devicesService.getParentContact(id);
+    return this.devicesService.getManagerContact(id);
   }
 
   @Get(':id/lock-status')
@@ -128,7 +128,7 @@ export class DevicesController {
   @Patch(':id/lock')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Khóa / mở khóa thiết bị (phụ huynh)' })
+  @ApiOperation({ summary: 'Khóa / mở khóa thiết bị (người quản lý)' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
   setLockStatus(
     @Req() req: AuthedRequest,
@@ -154,7 +154,7 @@ export class DevicesController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Phụ huynh huỷ pair thiết bị (cascade xoá lịch sử)' })
+  @ApiOperation({ summary: 'Người quản lý huỷ pair thiết bị (cascade xoá lịch sử)' })
   @ApiNoContentResponse({ description: 'Đã xoá' })
   @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
   remove(

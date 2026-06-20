@@ -12,6 +12,28 @@ import {
 import { Server, Socket } from 'socket.io';
 import { CommandsService } from '../commands/commands.service';
 
+/** Cell tower payload trong socket events (device_moved, device_heartbeat). */
+export interface CellTowerSnapshot {
+  type: string;
+  mcc: number;
+  mnc: number;
+  lac: number;
+  cid: number;
+  pci: number | null;
+  rssi: number | null;
+  signalDbm: number | null;
+  isServing: boolean;
+}
+
+/** Trạm BTS đang kết nối (sau khi resolve từ bts_stations DB). */
+export interface ConnectedBts {
+  id: number;
+  lat: number;
+  lon: number;
+  radio: string | null;
+  range: number | null;
+}
+
 export interface DeviceMovedEvent {
   deviceId: string;
   lat: number;
@@ -26,24 +48,8 @@ export interface DeviceMovedEvent {
   lac: number | null;
   signalDbm: number | null;
   timestamp: string;
-  cellTowers: Array<{
-    type: string;
-    mcc: number;
-    mnc: number;
-    lac: number;
-    cid: number;
-    pci: number | null;
-    rssi: number | null;
-    signalDbm: number | null;
-    isServing: boolean;
-  }>;
-  connectedBts: {
-    id: number;
-    lat: number;
-    lon: number;
-    radio: string | null;
-    range: number | null;
-  } | null;
+  cellTowers: CellTowerSnapshot[];
+  connectedBts: ConnectedBts | null;
   /** True when GPS position is suspiciously far from the connected BTS. */
   spoofingSuspected: boolean;
   /** Distance (m) between GPS fix and connected BTS, null when BTS unknown. */
@@ -129,8 +135,8 @@ export interface BatteryUpdateEvent {
 }
 
 /**
- * Bắn khi mobile gọi /ingest/heartbeat — device còn sống nhưng KHÔNG có fix
- * GPS mới (mất GPS hoặc đứng yên không ra fix). Dashboard dùng event này để:
+ * Bắn khi mobile gọi /ingest với payload không có locations — device còn
+ * sống nhưng KHÔNG có fix GPS mới (mất GPS hoặc đứng yên). Dashboard dùng:
  *   - Refresh `last_seen` và dọn trạng thái offline (KHÔNG đụng lat/lon marker).
  *   - Cập nhật realtime "đang nối trạm nào" qua `cellTowers` + `connectedBts`,
  *     giúp cha mẹ biết vùng phủ sóng hiện tại dù marker đứng yên ở fix GPS cuối.
@@ -140,24 +146,8 @@ export interface DeviceHeartbeatEvent {
   deviceId: string;
   batteryLevel: number | null;
   timestamp: string;
-  cellTowers: Array<{
-    type: string;
-    mcc: number;
-    mnc: number;
-    lac: number;
-    cid: number;
-    pci: number | null;
-    rssi: number | null;
-    signalDbm: number | null;
-    isServing: boolean;
-  }>;
-  connectedBts: {
-    id: number;
-    lat: number;
-    lon: number;
-    radio: string | null;
-    range: number | null;
-  } | null;
+  cellTowers: CellTowerSnapshot[];
+  connectedBts: ConnectedBts | null;
   /**
    * Epoch ms của fix GPS gần nhất mobile có. Null khi mobile chưa từng có
    * fix hoặc location service bị tắt. FE dùng để đếm "GPS mất N phút" mà

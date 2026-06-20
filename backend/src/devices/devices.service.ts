@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { haversineMeters, ONLINE_WINDOW_MS } from '../common/geo.util';
 import { EventsGateway, type GeofenceBreachEvent } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,21 +18,8 @@ import {
 } from './dto/pair-device.dto';
 import type { HistoryQualityMode } from './dto/history-query.dto';
 
-const ONLINE_WINDOW_MS = 5 * 60 * 1000;
-
 function isOnline(lastSeen: Date | null | undefined): boolean {
   return !!lastSeen && Date.now() - new Date(lastSeen).getTime() < ONLINE_WINDOW_MS;
-}
-
-function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6_371_000;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
 @Injectable()
@@ -55,12 +43,12 @@ export class DevicesService {
   }
 
   /**
-   * Public (device-scoped, no JWT) lookup of the parent's contact info so the
-   * monitored device can show "Liên hệ phụ huynh" on its own screen. We only
-   * expose the bits the device actually needs — never the parent's email
+   * Public (device-scoped, no JWT) lookup of the manager's contact info so the
+   * monitored device can show "Liên hệ người quản lý" on its own screen. We only
+   * expose the bits the device actually needs — never the manager's email
    * or pairing code.
    */
-  async getParentContact(
+  async getManagerContact(
     deviceId: string,
   ): Promise<{ displayName: string | null; phoneNumber: string | null }> {
     const device = await this.prisma.devices.findUnique({
@@ -141,11 +129,11 @@ export class DevicesService {
    */
   async pair(dto: PairDeviceDto): Promise<PairDeviceResponseDto> {
     const code = normalizePairingCode(dto.pairingCode);
-    const parent = await this.prisma.manager_accounts.findUnique({
+    const manager = await this.prisma.manager_accounts.findUnique({
       where: { pairing_code: code },
       select: { id: true },
     });
-    if (!parent) {
+    if (!manager) {
       throw new UnauthorizedException('Pairing code không hợp lệ');
     }
 
@@ -169,7 +157,7 @@ export class DevicesService {
     try {
       device = await this.prisma.devices.create({
         data: {
-          manager_account_id: parent.id,
+          manager_account_id: manager.id,
           owner_name: dto.ownerName.trim(),
           phone_number: phone,
           model: dto.device?.model?.trim() || null,
@@ -193,7 +181,7 @@ export class DevicesService {
     }
 
     this.logger.log(
-      `Paired device=${device.id} (${device.owner_name}) to parent=${parent.id}`,
+      `Paired device=${device.id} (${device.owner_name}) to manager=${manager.id}`,
     );
     return {
       deviceId: device.id,
@@ -245,7 +233,6 @@ export class DevicesService {
       const loc = locMap.get(d.id);
       return {
         id: d.id,
-        name: d.owner_name,
         owner_name: d.owner_name,
         phone_number: d.phone_number,
         model: d.model,
@@ -332,7 +319,7 @@ export class DevicesService {
       const lat = Number(row.latitude);
       const lon = Number(row.longitude);
       if (prevLat !== null && prevLon !== null) {
-        const stepDist = haversineMeters(prevLat, prevLon, lat, lon);
+        const stepDist = Math.round(haversineMeters(prevLat, prevLon, lat, lon));
         if (minDist > 0 && stepDist < minDist) continue;
         distanceTotal += stepDist;
       }
@@ -358,7 +345,6 @@ export class DevicesService {
     return {
       device: {
         id: device.id,
-        name: device.owner_name,
         owner_name: device.owner_name,
         phone_number: device.phone_number,
       },
@@ -383,7 +369,7 @@ export class DevicesService {
     // the Pairing screen) and any dashboards listening for list refreshes.
     this.events.emitDeviceDeleted({ deviceId: id });
 
-    this.logger.log(`Deleted device=${id} (parent=${managerAccountId})`);
+    this.logger.log(`Deleted device=${id} (manager=${managerAccountId})`);
   }
 
   async findOne(id: string, managerAccountId: string) {
@@ -451,11 +437,13 @@ export class DevicesService {
 
     let distanceToBts: number | null = null;
     if (location && cellTower?.bts_lat && cellTower?.bts_lon) {
-      distanceToBts = haversineMeters(
-        Number(location.latitude),
-        Number(location.longitude),
-        Number(cellTower.bts_lat),
-        Number(cellTower.bts_lon),
+      distanceToBts = Math.round(
+        haversineMeters(
+          Number(location.latitude),
+          Number(location.longitude),
+          Number(cellTower.bts_lat),
+          Number(cellTower.bts_lon),
+        ),
       );
     }
 

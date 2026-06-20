@@ -21,7 +21,6 @@ export interface ConnectedBts {
 /** Row in GET /api/v1/devices. */
 export interface Device {
   id: string;
-  name: string;
   owner_name: string;
   phone_number: string | null;
   model: string | null;
@@ -128,7 +127,6 @@ export interface HistoryPoint {
 export interface LocationHistory {
   device: {
     id: string;
-    name: string;
     owner_name: string;
     phone_number: string | null;
   };

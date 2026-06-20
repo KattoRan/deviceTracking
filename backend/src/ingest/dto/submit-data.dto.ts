@@ -117,9 +117,6 @@ export class CellTowerDto {
  *
  *   - `locations` non-empty → server lưu location_history, emit `device_moved`.
  *   - `locations` empty/omit → server chỉ refresh last_seen + emit `device_heartbeat`.
- *
- * Trước kia split thành /ingest và /heartbeat; gộp lại giúp mobile chỉ có 1
- * path code và schema đơn giản hơn.
  */
 export class SubmitDataDto {
   /**
@@ -143,7 +140,7 @@ export class SubmitDataDto {
 
   /**
    * Pin thiết bị (0–100). Khi <20% và trước đó ≥20%, server bắn alert
-   * low_battery + push notification cho phụ huynh.
+   * low_battery qua Socket.IO cho người quản lý.
    */
   @ApiPropertyOptional({ example: 42, minimum: 0, maximum: 100 })
   @IsOptional()

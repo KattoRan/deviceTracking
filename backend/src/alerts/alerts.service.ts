@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ONLINE_WINDOW_MS } from '../common/geo.util';
 import { EventsGateway } from '../events/events.gateway';
 import { PrismaService } from '../prisma/prisma.service';
-
-const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class AlertsService {
@@ -16,7 +15,7 @@ export class AlertsService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async detectOfflineDevices(): Promise<void> {
-    const cutoff = new Date(Date.now() - OFFLINE_THRESHOLD_MS);
+    const cutoff = new Date(Date.now() - ONLINE_WINDOW_MS);
     const stale = await this.prisma.devices.findMany({
       where: {
         is_offline_alerted: false,

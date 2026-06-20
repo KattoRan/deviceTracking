@@ -34,7 +34,7 @@ export class CommandsController {
   constructor(private readonly commandsService: CommandsService) {}
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Parent endpoints (JWT)
+  // Manager endpoints (JWT)
   // ──────────────────────────────────────────────────────────────────────────
 
   @Post('devices/:id/commands')

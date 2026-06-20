@@ -41,7 +41,7 @@ export class SosController {
   })
   @ApiOperation({
     summary:
-      'Mobile bấm SOS: lưu event + emit socket + push notification cho phụ huynh',
+      'Mobile bấm SOS: lưu event + emit socket cho người quản lý realtime',
   })
   @ApiCreatedResponse({ type: TriggerSosResponseDto })
   trigger(
@@ -54,13 +54,13 @@ export class SosController {
   @Get('sos')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Lịch sử SOS của phụ huynh (mới nhất trước)' })
+  @ApiOperation({ summary: 'Lịch sử SOS của người quản lý (mới nhất trước)' })
   list(
     @Req() req: AuthedRequest,
     @Query('limit') limit?: string,
   ) {
     const parsed = limit ? Math.min(parseInt(limit, 10) || 50, 200) : 50;
-    return this.sosService.listForParent(req.managerAccount.sub, parsed);
+    return this.sosService.listForManager(req.managerAccount.sub, parsed);
   }
 
   @Post('sos/:id/ack')
@@ -79,7 +79,7 @@ export class SosController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Đánh dấu tất cả SOS chưa xử lý của parent này là đã xử lý',
+    summary: 'Đánh dấu tất cả SOS chưa xử lý của manager này là đã xử lý',
   })
   acknowledgeAll(@Req() req: AuthedRequest): Promise<{ count: number }> {
     return this.sosService.acknowledgeAll(req.managerAccount.sub);

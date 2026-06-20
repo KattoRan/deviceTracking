@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { evaluateGeofences } from '../common/geo.util';
 import {
   EventsGateway,
   type GeofenceBreachEvent,
@@ -28,26 +29,9 @@ export interface GeofenceListItem {
 export interface GeofenceDetail extends GeofenceListItem {
   devices: Array<{
     id: string;
-    name: string;
     owner_name: string;
     phone_number: string | null;
   }>;
-}
-
-function haversineMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6_371_000;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 @Injectable()
@@ -74,7 +58,7 @@ export class GeofencesService {
       },
     });
     this.logger.log(
-      `Created geofence ${created.id} (${created.name}) parent=${managerAccountId}`,
+      `Created geofence ${created.id} (${created.name}) manager=${managerAccountId}`,
     );
     return this.toDetail(created.id, managerAccountId);
   }
@@ -285,7 +269,7 @@ export class GeofencesService {
     if (all.length === 0) return [];
 
     // Breach state isn't naturally scoped — intersect with devices this
-    // parent owns (the device list is small per parent, so the lookup is
+    // manager owns (the device list is small per manager, so the lookup is
     // cheap and avoids leaking other parents' alerts).
     const ownedDeviceIds = new Set(
       (
@@ -398,32 +382,7 @@ export class GeofencesService {
     const lat = Number(rows[0].latitude);
     const lon = Number(rows[0].longitude);
 
-    let nearest: {
-      id: string;
-      name: string;
-      centerLat: number;
-      centerLon: number;
-      radiusM: number;
-      distanceM: number;
-    } | null = null;
-    let anyInside = false;
-
-    for (const z of zones) {
-      const centerLat = Number(z.lat);
-      const centerLon = Number(z.lon);
-      const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
-      if (distanceM <= z.radius_m) anyInside = true;
-      if (nearest === null || distanceM < nearest.distanceM) {
-        nearest = {
-          id: z.id,
-          name: z.name,
-          centerLat,
-          centerLon,
-          radiusM: z.radius_m,
-          distanceM,
-        };
-      }
-    }
+    const { anyInside, nearest } = evaluateGeofences(lat, lon, zones);
     if (!nearest) return;
 
     const current: 'inside' | 'outside' = anyInside ? 'inside' : 'outside';
@@ -494,7 +453,6 @@ export class GeofencesService {
       updated_at: row.updated_at,
       devices: row.device_geofences.map((dg) => ({
         id: dg.device.id,
-        name: dg.device.owner_name,
         owner_name: dg.device.owner_name,
         phone_number: dg.device.phone_number,
       })),

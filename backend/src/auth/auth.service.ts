@@ -54,7 +54,7 @@ export class AuthService {
         pairing_code: pairingCode,
       },
     });
-    this.logger.log(`Đăng ký phụ huynh ${email} với pairing code ${pairingCode}`);
+    this.logger.log(`Đăng ký người quản lý ${email} với pairing code ${pairingCode}`);
 
     return this.buildSession(account);
   }

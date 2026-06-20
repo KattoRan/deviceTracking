@@ -70,7 +70,7 @@ export class SosService {
     };
   }
 
-  async listForParent(managerAccountId: string, limit = 50) {
+  async listForManager(managerAccountId: string, limit = 50) {
     const events = await this.prisma.sos_events.findMany({
       where: { manager_account_id: managerAccountId },
       orderBy: { triggered_at: 'desc' },
@@ -111,9 +111,9 @@ export class SosService {
   }
 
   /**
-   * Đánh dấu tất cả SOS chưa xử lý của parent này là đã xử lý — dùng cho nút
+   * Đánh dấu tất cả SOS chưa xử lý của manager này là đã xử lý — dùng cho nút
    * "Xử lý tất cả" trên trang lịch sử SOS. Scope cứng theo manager_account_id
-   * trong filter để không leak event của parent khác.
+   * trong filter để không leak event của manager khác.
    */
   async acknowledgeAll(managerAccountId: string): Promise<{ count: number }> {
     const result = await this.prisma.sos_events.updateMany({
@@ -127,7 +127,7 @@ export class SosService {
   }
 
   /**
-   * Xoá vĩnh viễn các SOS event đã xử lý của parent này — nút "Xoá lịch sử".
+   * Xoá vĩnh viễn các SOS event đã xử lý của manager này — nút "Xoá lịch sử".
    * KHÔNG xoá event chưa xử lý (vẫn cần hiển thị làm cảnh báo active).
    */
   async deleteAcknowledged(managerAccountId: string): Promise<{ count: number }> {

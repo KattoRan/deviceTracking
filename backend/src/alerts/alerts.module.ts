@@ -6,6 +6,5 @@ import { AlertsService } from './alerts.service';
 @Module({
   imports: [ScheduleModule.forRoot(), EventsModule],
   providers: [AlertsService],
-  exports: [AlertsService],
 })
 export class AlertsModule {}

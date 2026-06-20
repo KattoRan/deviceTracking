@@ -9,7 +9,7 @@ import {
 } from 'class-validator';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'parent@example.com' })
+  @ApiProperty({ example: 'manager@example.com' })
   @IsEmail({}, { message: 'Email không hợp lệ' })
   email: string;
 
@@ -30,7 +30,7 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  @ApiProperty({ example: 'parent@example.com' })
+  @ApiProperty({ example: 'manager@example.com' })
   @IsEmail({}, { message: 'Email không hợp lệ' })
   email: string;
 
@@ -44,7 +44,7 @@ export class ManagerAccountDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty({ example: 'parent@example.com' })
+  @ApiProperty({ example: 'manager@example.com' })
   email: string;
 
   @ApiProperty({ example: 'Gia đình họ Nguyễn', nullable: true })

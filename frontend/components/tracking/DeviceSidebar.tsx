@@ -59,7 +59,7 @@ export default function DeviceSidebar({
       if (status !== "all" && d.status !== status) return false;
       if (!q) return true;
       return (
-        d.name.toLowerCase().includes(q) ||
+        d.owner_name.toLowerCase().includes(q) ||
         (d.phone_number?.toLowerCase().includes(q) ?? false) ||
         (d.model?.toLowerCase().includes(q) ?? false)
       );
@@ -243,7 +243,7 @@ function DeviceItem({
           <div className="flex items-center justify-between">
             <div className="flex min-w-0 items-center gap-1.5">
               <p className="truncate text-sm font-medium text-slate-900">
-                {device.name || device.phone_number}
+                {device.owner_name || device.phone_number}
               </p>
               {device.is_locked && (
                 <span title="Thiết bị đã bị khóa">

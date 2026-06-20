@@ -5,10 +5,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BtsService } from '../bts/bts.service';
+import {
+  DEFAULT_BTS_RANGE_M,
+  evaluateGeofences,
+  haversineMeters,
+  LOW_BATTERY_RESET_THRESHOLD,
+  LOW_BATTERY_THRESHOLD,
+  SPOOF_RANGE_MULTIPLIER,
+} from '../common/geo.util';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { LocationDto, SubmitDataDto } from './dto/submit-data.dto';
+import {
+  LocationDto,
+  type LocationQuality,
+  SubmitDataDto,
+} from './dto/submit-data.dto';
 import {
   ConcurrencyQueue,
   isValidCell,
@@ -22,7 +34,6 @@ import {
 // from one place when boundaries change.
 const ACCURACY_GPS_GRADE_M = 20;
 const ACCURACY_APPROX_M = 80;
-type LocationQuality = 'gps' | 'approx' | 'network';
 
 function deriveQuality(
   loc: LocationDto,
@@ -32,22 +43,6 @@ function deriveQuality(
   if (loc.accuracy <= ACCURACY_GPS_GRADE_M) return 'gps';
   if (loc.accuracy <= ACCURACY_APPROX_M) return 'approx';
   return 'network';
-}
-
-function haversineMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6_371_000;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // H3 — dedup emit `device_moved`. Khi mobile ở tick rate cao (5s) + user
@@ -187,8 +182,6 @@ export class IngestService {
 
       // Spoofing detect (chỉ tier gps). Fake-GPS app đổi OS location nhưng
       // không đổi cell device đang attach → khoảng cách bất thường = nghi vấn.
-      const SPOOF_RANGE_MULTIPLIER = 2;
-      const DEFAULT_BTS_RANGE_M = 2000;
       let spoofingSuspected = false;
       let gpsBtsDistanceM: number | null = null;
       if (connectedBts && latestQuality === 'gps') {
@@ -242,7 +235,6 @@ export class IngestService {
         latestAt,
         dto.batteryLevel,
         device.owner_name,
-        device.manager_account_id,
         dto.activity ?? null,
         dto.activityConfidence ?? null,
       );
@@ -257,7 +249,6 @@ export class IngestService {
         void this.evaluateDeviceZones(
           deviceId,
           device.owner_name,
-          device.manager_account_id,
           latest.latitude,
           latest.longitude,
           device.device_geofences.map((dg) => dg.geofence),
@@ -271,8 +262,6 @@ export class IngestService {
     // ══ Nhánh HEARTBEAT (không locations) ═════════════════════════════════
     const batteryLevel = dto.batteryLevel;
     const now = new Date();
-    const LOW_BATTERY_THRESHOLD = 20;
-    const LOW_BATTERY_RESET_THRESHOLD = 25;
 
     let lowBatteryTransition: 'arm' | 'disarm' | null = null;
     if (batteryLevel != null) {
@@ -322,8 +311,6 @@ export class IngestService {
         select: { latitude: true, longitude: true },
       });
       if (recentFix) {
-        const SPOOF_RANGE_MULTIPLIER = 2;
-        const DEFAULT_BTS_RANGE_M = 2000;
         const dist = Math.round(
           haversineMeters(
             Number(recentFix.latitude),
@@ -404,7 +391,6 @@ export class IngestService {
   private async evaluateDeviceZones(
     deviceId: string,
     deviceName: string | null,
-    managerAccountId: string,
     lat: number,
     lon: number,
     geofences: Array<{
@@ -418,32 +404,7 @@ export class IngestService {
   ): Promise<void> {
     if (geofences.length === 0) return;
     try {
-      let nearest: {
-        id: string;
-        name: string;
-        centerLat: number;
-        centerLon: number;
-        radiusM: number;
-        distanceM: number;
-      } | null = null;
-      let anyInside = false;
-
-      for (const g of geofences) {
-        const centerLat = Number(g.lat);
-        const centerLon = Number(g.lon);
-        const distanceM = haversineMeters(lat, lon, centerLat, centerLon);
-        if (distanceM <= g.radius_m) anyInside = true;
-        if (nearest === null || distanceM < nearest.distanceM) {
-          nearest = {
-            id: g.id,
-            name: g.name,
-            centerLat,
-            centerLon,
-            radiusM: g.radius_m,
-            distanceM,
-          };
-        }
-      }
+      const { anyInside, nearest } = evaluateGeofences(lat, lon, geofences);
       if (!nearest) return;
 
       const current = anyInside ? 'inside' : 'outside';
@@ -498,16 +459,14 @@ export class IngestService {
     latestAt: Date,
     batteryLevel: number | undefined,
     ownerName: string | null,
-    managerAccountId: string,
     activity: string | null,
     activityConfidence: number | null,
   ): Promise<void> {
     try {
       // Pre-check battery state to know whether we need to flip alert flags
-      // alongside updating last_seen. Hysteresis: arm alert at <20%, disarm
-      // at ≥25% so a device hovering around 20% doesn't ping repeatedly.
-      const LOW_BATTERY_THRESHOLD = 20;
-      const LOW_BATTERY_RESET_THRESHOLD = 25;
+      // alongside updating last_seen. Hysteresis (LOW_BATTERY_THRESHOLD = 20,
+      // LOW_BATTERY_RESET_THRESHOLD = 25) so a device hovering around 20%
+      // doesn't ping repeatedly.
       let lowBatteryTransition: 'arm' | 'disarm' | null = null;
       let clearedOfflineFlag = false;
       const prev = await this.prisma.devices.findUnique({

@@ -129,11 +129,10 @@ export class BtsService {
     // The `set_geom` trigger auto-populates `geom` from lat/lon on INSERT.
     // Raw SQL with ON CONFLICT is atomic — Prisma's upsert isn't and races
     // with other queue workers reading the same cell. Combain returns
-    // `accuracy` (estimated error radius), not coverage range, and no
-    // address — the address column stays null for rows ingested this way.
+    // `accuracy` (estimated error radius), not coverage range.
     await this.prisma.$executeRaw`
-      INSERT INTO bts_stations (mcc, mnc, lac, cid, lat, lon, radio, range, address)
-      VALUES (${mcc}, ${mnc}, ${lac}, ${cid}, ${lat}, ${lng}, ${radio}, ${data.accuracy ?? 0}, ${null})
+      INSERT INTO bts_stations (mcc, mnc, lac, cid, lat, lon, radio, range)
+      VALUES (${mcc}, ${mnc}, ${lac}, ${cid}, ${lat}, ${lng}, ${radio}, ${data.accuracy ?? 0})
       ON CONFLICT (mcc, mnc, lac, cid) DO NOTHING;
     `;
 
@@ -176,7 +175,6 @@ export class BtsService {
         lon: true,
         radio: true,
         range: true,
-        address: true,
       },
     });
     if (!bts) throw new NotFoundException(`BTS with id ${id} not found`);

@@ -377,7 +377,7 @@ export default function GeofencePanel({
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium text-slate-900">
-                            {d.name}
+                            {d.owner_name}
                           </div>
                           <div className="truncate font-mono text-xs text-slate-500">
                             {d.phone_number}
@@ -406,7 +406,7 @@ export default function GeofencePanel({
                     <option value="">+ Thêm thiết bị…</option>
                     {availableDevices.map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.name} · {d.phone_number}
+                        {d.owner_name} · {d.phone_number}
                       </option>
                     ))}
                   </select>

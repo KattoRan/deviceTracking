@@ -80,7 +80,7 @@ export default function ManageDevicesPage() {
       if (statusFilter !== "all" && d.status !== statusFilter) return false;
       if (!q) return true;
       return (
-        d.name.toLowerCase().includes(q) ||
+        d.owner_name.toLowerCase().includes(q) ||
         (d.phone_number?.toLowerCase().includes(q) ?? false) ||
         (d.model ?? "").toLowerCase().includes(q) ||
         d.id.toLowerCase().includes(q)
@@ -225,7 +225,7 @@ function DeviceTable({ rows, selectedId, onSelect }: RowProps) {
                       <User className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-slate-900">{d.name}</p>
+                      <p className="truncate font-medium text-slate-900">{d.owner_name}</p>
                       <p className="truncate text-xs text-slate-500">
                         {d.id.slice(0, 8)}…
                       </p>
@@ -290,7 +290,7 @@ function DeviceCardList({ rows, selectedId, onSelect }: RowProps) {
             )}
           >
             <div className="flex items-center justify-between gap-2">
-              <p className="truncate font-medium text-slate-900">{d.name}</p>
+              <p className="truncate font-medium text-slate-900">{d.owner_name}</p>
               <span
                 className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
