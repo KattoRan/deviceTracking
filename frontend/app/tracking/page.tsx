@@ -21,7 +21,6 @@ import type { BtsFeature, BtsGeoJson } from "@/types/bts";
 import type {
   ConnectedBts,
   Device,
-  DeviceHeartbeatEvent,
   DeviceMovedEvent,
 } from "@/types/device";
 import type { GeofenceListItem } from "@/types/geofence";
@@ -137,33 +136,7 @@ function TrackingPageInner() {
       prev && prev.id === event.deviceId ? { ...prev, ...patch } : prev,
     );
   }, []);
-  // Heartbeat: device còn sống nhưng KHÔNG có fix GPS mới gửi lên (có thể
-  // do mobile gate ingest vì stationary, hoặc thực sự mất GPS). Refresh
-  // last_seen + status + pin + cellTowers/connectedBts realtime, KHÔNG đụng
-  // lat/lon — marker giữ ở fix GPS cuối.
-  //
-  // `lastGpsAt` bump từ `event.lastFixAt` (mobile source of truth: timestamp
-  // fix GPS gần nhất từ OS, kể cả fix bị gate). Null khi mobile chưa có fix
-  // hoặc location off → lastGpsAt stay → badge "GPS mất" fire đúng.
-  const handleDeviceHeartbeat = useCallback((event: DeviceHeartbeatEvent) => {
-    const patch: Partial<Device> = {
-      last_seen: event.timestamp,
-      status: "online",
-      cellTowers: event.cellTowers,
-      connectedBts: event.connectedBts,
-    };
-    if (event.batteryLevel != null) patch.last_battery = event.batteryLevel;
-    if (event.lastFixAt) {
-      patch.lastGpsAt = new Date(event.lastFixAt).toISOString();
-    }
-    setDevices((prev) =>
-      prev.map((d) => (d.id === event.deviceId ? { ...d, ...patch } : d)),
-    );
-    setSelectedDevice((prev) =>
-      prev && prev.id === event.deviceId ? { ...prev, ...patch } : prev,
-    );
-  }, []);
-  useSocket(handleDeviceMoved, handleDeviceHeartbeat);
+  useSocket(handleDeviceMoved);
 
   // Derive trạng thái offline từ socket dùng chung. Trước đây trang chỉ nghe
   // `device_moved`, nên khi cron mark device offline marker vẫn "đang hoạt

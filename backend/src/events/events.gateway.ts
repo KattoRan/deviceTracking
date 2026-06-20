@@ -12,7 +12,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { CommandsService } from '../commands/commands.service';
 
-/** Cell tower payload trong socket events (device_moved, device_heartbeat). */
+/** Cell tower payload trong socket events (device_moved). */
 export interface CellTowerSnapshot {
   type: string;
   mcc: number;
@@ -132,28 +132,6 @@ export interface BatteryUpdateEvent {
   deviceId: string;
   batteryLevel: number;
   timestamp: string;
-}
-
-/**
- * Bắn khi mobile gọi /ingest với payload không có locations — device còn
- * sống nhưng KHÔNG có fix GPS mới (mất GPS hoặc đứng yên). Dashboard dùng:
- *   - Refresh `last_seen` và dọn trạng thái offline (KHÔNG đụng lat/lon marker).
- *   - Cập nhật realtime "đang nối trạm nào" qua `cellTowers` + `connectedBts`,
- *     giúp cha mẹ biết vùng phủ sóng hiện tại dù marker đứng yên ở fix GPS cuối.
- *   - Đếm thời gian từ fix GPS cuối → hiển thị badge "GPS mất N phút".
- */
-export interface DeviceHeartbeatEvent {
-  deviceId: string;
-  batteryLevel: number | null;
-  timestamp: string;
-  cellTowers: CellTowerSnapshot[];
-  connectedBts: ConnectedBts | null;
-  /**
-   * Epoch ms của fix GPS gần nhất mobile có. Null khi mobile chưa từng có
-   * fix hoặc location service bị tắt. FE dùng để đếm "GPS mất N phút" mà
-   * không bị false positive khi user đứng yên + mobile gating ingest.
-   */
-  lastFixAt: number | null;
 }
 
 /** Room name a device joins to receive its own commands. */
@@ -290,9 +268,5 @@ export class EventsGateway
 
   emitBatteryUpdate(event: BatteryUpdateEvent) {
     this.server.emit('battery_update', event);
-  }
-
-  emitDeviceHeartbeat(event: DeviceHeartbeatEvent) {
-    this.server.emit('device_heartbeat', event);
   }
 }

@@ -53,6 +53,7 @@ coverage/
 # Internal specs
 SPEC.md
 THESIS_GUIDE.md
+FLOWS.md
 
 .apk
 

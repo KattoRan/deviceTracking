@@ -27,10 +27,9 @@ import geofenceService from "@/services/geofenceService";
 import { sosService, type SosEvent } from "@/services/sosService";
 import { cn } from "@/lib/utils";
 import type { GeofenceBreachEvent } from "@/types/geofence";
-import type { DeviceHeartbeatEvent, DeviceMovedEvent } from "@/types/device";
+import type { DeviceMovedEvent } from "@/types/device";
 
 type DeviceMovedHandler = (event: DeviceMovedEvent) => void;
-type DeviceHeartbeatHandler = (event: DeviceHeartbeatEvent) => void;
 
 const RETURNED_DISMISS_MS = 6_000;
 let returnedCounter = 0;
@@ -127,11 +126,6 @@ interface MonitoringAlertsContextValue {
    * Trả về hàm gỡ đăng ký. Caller chịu trách nhiệm gọi nó trong cleanup.
    */
   subscribeDeviceMoved: (handler: DeviceMovedHandler) => () => void;
-  /**
-   * Tương tự subscribeDeviceMoved nhưng cho device_heartbeat — caller dùng
-   * để refresh last_seen UI mà không phải xử lý lại tọa độ.
-   */
-  subscribeDeviceHeartbeat: (handler: DeviceHeartbeatHandler) => () => void;
 }
 
 const MonitoringAlertsContext =
@@ -171,25 +165,12 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
   );
   const [returned, setReturned] = useState<ReturnedToast[]>([]);
   const deviceMovedHandlersRef = useRef<Set<DeviceMovedHandler>>(new Set());
-  const deviceHeartbeatHandlersRef = useRef<Set<DeviceHeartbeatHandler>>(
-    new Set(),
-  );
 
   const subscribeDeviceMoved = useCallback(
     (handler: DeviceMovedHandler) => {
       deviceMovedHandlersRef.current.add(handler);
       return () => {
         deviceMovedHandlersRef.current.delete(handler);
-      };
-    },
-    [],
-  );
-
-  const subscribeDeviceHeartbeat = useCallback(
-    (handler: DeviceHeartbeatHandler) => {
-      deviceHeartbeatHandlersRef.current.add(handler);
-      return () => {
-        deviceHeartbeatHandlersRef.current.delete(handler);
       };
     },
     [],
@@ -359,19 +340,6 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       for (const h of deviceMovedHandlersRef.current) h(event);
     });
 
-    // Heartbeat — device báo còn sống nhưng không có fix GPS mới. Dọn offline
-    // map (cron có thể đã mark trước đó) và dispatch để trang tracking
-    // refresh last_seen mà không phải overwrite marker.
-    socket.on("device_heartbeat", (event: DeviceHeartbeatEvent) => {
-      setOfflineMap((prev) => {
-        if (!prev.has(event.deviceId)) return prev;
-        const next = new Map(prev);
-        next.delete(event.deviceId);
-        return next;
-      });
-      for (const h of deviceHeartbeatHandlersRef.current) h(event);
-    });
-
     return () => {
       socket.off("geofence_breach");
       socket.off("sos_alert");
@@ -379,7 +347,6 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       socket.off("device_offline");
       socket.off("battery_update");
       socket.off("device_moved");
-      socket.off("device_heartbeat");
       socket.disconnect();
     };
   }, [dismissReturned]);
@@ -461,7 +428,6 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       dismissLowBattery,
       dismissOffline,
       subscribeDeviceMoved,
-      subscribeDeviceHeartbeat,
     }),
     [
       outside,
@@ -476,7 +442,6 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       dismissLowBattery,
       dismissOffline,
       subscribeDeviceMoved,
-      subscribeDeviceHeartbeat,
     ],
   );
 

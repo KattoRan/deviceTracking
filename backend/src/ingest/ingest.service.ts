@@ -83,17 +83,18 @@ export class IngestService {
   }
 
   /**
-   * Unified telemetry endpoint. Trước kia split thành /ingest (có locations)
-   * và /heartbeat (không locations); giờ gộp 1 path code, branch theo
-   * `dto.locations` có hay không.
+   * Unified telemetry endpoint.
    *
-   *   - `locations` non-empty → flow ingest đầy đủ: persist location_history,
-   *     emit `device_moved`, eval geofence, spoof check, …
-   *   - `locations` empty/omit → flow heartbeat: chỉ refresh last_seen,
-   *     low-battery transition, emit `device_heartbeat`.
+   *   - `locations` non-empty → MOVE: persist location_history, emit
+   *     `device_moved`, eval geofence, spoof check, low-battery transition.
+   *   - `locations` empty/omit → minimal liveness: chỉ refresh `last_seen`
+   *     + clear `is_offline_alerted` để cron offline detection không
+   *     mark nhầm khi mobile mất GPS hoàn toàn.
    *
-   * Bước common (resolve serving cell + connectedBts, lookup BTS) chạy ở
-   * cả 2 nhánh để cha mẹ luôn thấy "đang nối trạm nào" realtime.
+   * Với mobile event-driven hiện tại (STILL `distanceInterval=0` → OS fire
+   * fix mỗi 30s) MOVE flow đảm nhận 99%+ traffic. Heartbeat-only path chỉ
+   * fire khi GPS unavailable hoàn toàn (permission revoke, location off,
+   * chip lỗi) — case <1%, không cần emit gì cho FE.
    */
   async saveData(
     deviceId: string,
@@ -108,7 +109,6 @@ export class IngestService {
         owner_name: true,
         phone_number: true,
         manager_account_id: true,
-        is_low_battery_alerted: true,
         is_offline_alerted: true,
         device_geofences: {
           include: {
@@ -259,124 +259,23 @@ export class IngestService {
       return { success: true, message: 'Data received' };
     }
 
-    // ══ Nhánh HEARTBEAT (không locations) ═════════════════════════════════
-    const batteryLevel = dto.batteryLevel;
-    const now = new Date();
-
-    let lowBatteryTransition: 'arm' | 'disarm' | null = null;
-    if (batteryLevel != null) {
-      if (
-        batteryLevel < LOW_BATTERY_THRESHOLD &&
-        !device.is_low_battery_alerted
-      ) {
-        lowBatteryTransition = 'arm';
-      } else if (
-        batteryLevel >= LOW_BATTERY_RESET_THRESHOLD &&
-        device.is_low_battery_alerted
-      ) {
-        lowBatteryTransition = 'disarm';
-      }
-    }
-
+    // ══ Heartbeat-only: minimal liveness ════════════════════════════════
+    // Mobile event-driven gửi nhánh này hiếm (<1%). Chỉ cần đảm bảo cron
+    // offline detection không mark nhầm. Battery + low-battery alert đi
+    // qua MOVE flow vì user phải có ít nhất 1 GPS fix gần đây mới hữu ích
+    // (pin tụt không có vị trí thì alert cũng không actionable).
     const updateData: {
       last_seen: Date;
       last_battery?: number;
-      is_low_battery_alerted?: boolean;
       is_offline_alerted?: boolean;
-    } = { last_seen: now };
-    if (batteryLevel != null) updateData.last_battery = batteryLevel;
-    if (lowBatteryTransition === 'arm') updateData.is_low_battery_alerted = true;
-    else if (lowBatteryTransition === 'disarm')
-      updateData.is_low_battery_alerted = false;
+    } = { last_seen: new Date() };
+    if (dto.batteryLevel != null) updateData.last_battery = dto.batteryLevel;
     if (device.is_offline_alerted) updateData.is_offline_alerted = false;
 
     await this.prisma.devices.update({
       where: { id: deviceId },
       data: updateData,
     });
-
-    // Spoof check trên heartbeat: nếu có connectedBts + fix GPS gps-tier gần
-    // đây (5 phút) trong location_history, check khoảng cách. Cần thiết vì
-    // khi user đứng yên + fake GPS thì ingest path không fire, spoof không
-    // được phát hiện cho đến khi user di chuyển trong fake location.
-    if (connectedBts) {
-      const recentGpsCutoff = new Date(Date.now() - 5 * 60 * 1000);
-      const recentFix = await this.prisma.location_history.findFirst({
-        where: {
-          device_id: deviceId,
-          quality: 'gps',
-          recorded_at: { gte: recentGpsCutoff },
-        },
-        orderBy: { recorded_at: 'desc' },
-        select: { latitude: true, longitude: true },
-      });
-      if (recentFix) {
-        const dist = Math.round(
-          haversineMeters(
-            Number(recentFix.latitude),
-            Number(recentFix.longitude),
-            connectedBts.lat,
-            connectedBts.lon,
-          ),
-        );
-        const btsRange = connectedBts.range ?? DEFAULT_BTS_RANGE_M;
-        if (dist > btsRange * SPOOF_RANGE_MULTIPLIER) {
-          this.logger.warn(
-            `GPS SPOOFING suspected (heartbeat) device=${deviceId} ` +
-              `last_gps=(${recentFix.latitude},${recentFix.longitude}) ` +
-              `bts=(${connectedBts.lat},${connectedBts.lon}) ` +
-              `dist=${dist}m range=${btsRange}m`,
-          );
-          this.eventsGateway.emitDeviceMoved({
-            deviceId,
-            lat: Number(recentFix.latitude),
-            lon: Number(recentFix.longitude),
-            accuracy: null,
-            quality: 'gps',
-            cid: servingCell?.cid ?? null,
-            lac: servingCell?.lac ?? null,
-            signalDbm: servingCell?.signalDbm ?? null,
-            timestamp: now.toISOString(),
-            cellTowers: cellTowersPayload,
-            connectedBts,
-            spoofingSuspected: true,
-            gpsBtsDistanceM: dist,
-            lastFixAt: dto.lastFixAt ?? null,
-            activity: dto.activity ?? null,
-            activityConfidence: dto.activityConfidence ?? null,
-          });
-        }
-      }
-    }
-
-    this.eventsGateway.emitDeviceHeartbeat({
-      deviceId,
-      batteryLevel: batteryLevel ?? null,
-      timestamp: now.toISOString(),
-      cellTowers: cellTowersPayload,
-      connectedBts,
-      lastFixAt: dto.lastFixAt ?? null,
-    });
-
-    if (batteryLevel != null) {
-      this.eventsGateway.emitBatteryUpdate({
-        deviceId,
-        batteryLevel,
-        timestamp: now.toISOString(),
-      });
-    }
-    if (lowBatteryTransition === 'arm' && batteryLevel != null) {
-      const lowEvent = {
-        deviceId,
-        deviceName: device.owner_name,
-        batteryLevel,
-        timestamp: now.toISOString(),
-      };
-      this.eventsGateway.emitLowBattery(lowEvent);
-      this.logger.warn(
-        `Low battery (heartbeat) device=${deviceId} (${device.owner_name ?? '?'}) ${batteryLevel}%`,
-      );
-    }
 
     return { success: true, message: 'Heartbeat received' };
   }
