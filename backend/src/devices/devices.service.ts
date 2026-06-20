@@ -78,6 +78,35 @@ export class DevicesService {
     };
   }
 
+  /**
+   * Persist 1 log event từ mobile. Log nhẹ — chỉ insert row, không emit
+   * socket (frontend có thể fetch list khi cần debug). Validate device tồn
+   * tại để tránh spam row mồ côi.
+   */
+  async logEvent(
+    deviceId: string,
+    dto: { level: string; message: string; context?: Record<string, unknown> },
+  ): Promise<void> {
+    const device = await this.prisma.devices.findUnique({
+      where: { id: deviceId },
+      select: { id: true },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+    await this.prisma.device_logs.create({
+      data: {
+        device_id: deviceId,
+        level: dto.level,
+        message: dto.message,
+        // Cast Record<string, unknown> sang Prisma's InputJsonValue — Prisma's
+        // type không chấp nhận Record generic.
+        context: (dto.context as Prisma.InputJsonValue | undefined) ?? undefined,
+      },
+    });
+    this.logger.warn(
+      `[device-log] ${dto.level} device=${deviceId}: ${dto.message}`,
+    );
+  }
+
   async getLockStatus(deviceId: string): Promise<{ locked: boolean }> {
     const device = await this.prisma.devices.findUnique({
       where: { id: deviceId },

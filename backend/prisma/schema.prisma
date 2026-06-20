@@ -44,8 +44,22 @@ model devices {
   commands           device_commands[]
   device_geofences   device_geofences[]
   sos_events         sos_events[]
+  logs               device_logs[]
 
   @@index([manager_account_id])
+}
+
+model device_logs {
+  id         String   @id @default(uuid())
+  device_id  String
+  level      String   @db.VarChar(16)
+  message    String
+  context    Json?
+  created_at DateTime @default(now())
+
+  device devices @relation(fields: [device_id], references: [id], onDelete: Cascade)
+
+  @@index([device_id, created_at(sort: Desc)])
 }
 
 model geofences {

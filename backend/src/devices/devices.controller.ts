@@ -25,6 +25,7 @@ import {
 import { JwtAuthGuard, type AuthedRequest } from '../auth/jwt-auth.guard';
 import type { GeofenceBreachEvent } from '../events/events.gateway';
 import { DevicesService } from './devices.service';
+import { DeviceLogDto } from './dto/device-log.dto';
 import { HistoryQueryDto } from './dto/history-query.dto';
 import {
   PairDeviceDto,
@@ -108,6 +109,20 @@ export class DevicesController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     return this.devicesService.getLockStatus(id);
+  }
+
+  @Post(':id/log')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Mobile log endpoint — gửi error/warn từ thiết bị về server để admin debug.',
+  })
+  @ApiNotFoundResponse({ description: 'Không tìm thấy thiết bị' })
+  log(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: DeviceLogDto,
+  ): Promise<void> {
+    return this.devicesService.logEvent(id, dto);
   }
 
   @Patch(':id/lock')

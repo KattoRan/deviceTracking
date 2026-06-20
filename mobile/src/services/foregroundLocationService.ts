@@ -15,6 +15,7 @@ import {
   stopActivityRecognition,
 } from './activityService';
 import { getCellTowerInfo, getCellTowerInfoFresh } from './cellInfoService';
+import { logRemote } from './logService';
 import { connectMqtt, isMqttConnected, publishTelemetry } from './mqttService';
 
 export const FOREGROUND_LOCATION_TASK = 'foreground-location-task';
@@ -29,7 +30,6 @@ AppState.addEventListener('change', (state) => {
 
 const STORAGE_KEY_DEVICE = '@deviceTracking/device';
 const STORAGE_KEY_BUFFER = '@deviceTracking/fgBuffer';
-const STORAGE_KEY_LAST_SENT = '@deviceTracking/fgLastSent'; // {lat, lon, t}
 
 const ACCURACY_GPS_GRADE_M = 20;
 const ACCURACY_APPROX_M = 80;
@@ -87,22 +87,6 @@ function classifyQuality(accuracy: number | null | undefined): LocationQuality {
   return 'network';
 }
 
-function haversineMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6_371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 // In-memory cell cache cho TaskManager task. Module-level state OK vì task
 // run trong cùng JS context (Hermes). Reset khi process killed (acceptable —
 // lần fire kế tiếp re-sample fresh).
@@ -150,27 +134,10 @@ async function getCachedCells(): Promise<
   }
 }
 
-interface LastSent {
-  lat: number;
-  lon: number;
-  t: number; // epoch ms
-  acc?: number; // GPS accuracy (m) của fix đã gửi — dùng cho movement gate
-}
-
-async function getLastSent(): Promise<LastSent | null> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY_LAST_SENT);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as LastSent;
-  } catch {
-    return null;
-  }
-}
-
-async function setLastSent(lat: number, lon: number, acc?: number): Promise<void> {
-  const payload: LastSent = { lat, lon, t: Date.now(), acc };
-  await AsyncStorage.setItem(STORAGE_KEY_LAST_SENT, JSON.stringify(payload));
-}
+// Epoch ms khi gửi telemetry thành công lần cuối — dùng để throttle heartbeat
+// (30s MOVING / 60s STILL). In-memory state OK vì service long-running; mất
+// khi process restart cũng OK — heartbeat đầu tiên sau restart gửi luôn.
+let lastSentAt = 0;
 
 async function loadStoredDeviceId(): Promise<string | null> {
   try {
@@ -223,9 +190,10 @@ async function readBatteryLevel(): Promise<number | undefined> {
  *
  * Trả null nếu buffer rỗng (→ task chỉ gửi heartbeat).
  */
-async function prepareIngest(
-  _force: boolean,
-): Promise<{ toSend: LocationData[]; remaining: LocationData[] } | null> {
+async function prepareIngest(): Promise<{
+  toSend: LocationData[];
+  remaining: LocationData[];
+} | null> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY_BUFFER);
   if (!raw) return null;
   let buffer: LocationData[] = JSON.parse(raw);
@@ -254,17 +222,16 @@ async function prepareIngest(
  * >= 30s (MOVING) hoặc >= 60s (STILL). Ingest (có locations) luôn gửi.
  */
 async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
-  const ingest = await prepareIngest(force);
+  const ingest = await prepareIngest();
   const hasLocations = ingest !== null;
   console.log(`[fg-location] sendTelemetry entered hasLoc=${hasLocations} force=${force} fg=${isAppForeground}`);
 
   // Heartbeat-only path bị throttle để không spam khi tick admin = 5s.
   if (!hasLocations && !force) {
-    const last = await getLastSent();
     const throttle = isStill() ? HEARTBEAT_STILL_MS : HEARTBEAT_MIN_INTERVAL_MS;
-    const elapsed = last ? Date.now() - last.t : -1;
-    console.log(`[fg-location] heartbeat check elapsed=${elapsed}ms throttle=${throttle}ms lastSent=${last?.t ?? 'null'}`);
-    if (last && elapsed < throttle) {
+    const elapsed = lastSentAt > 0 ? Date.now() - lastSentAt : -1;
+    console.log(`[fg-location] heartbeat check elapsed=${elapsed}ms throttle=${throttle}ms`);
+    if (lastSentAt > 0 && elapsed < throttle) {
       console.log('[fg-location] heartbeat throttled — skip');
       return;
     }
@@ -364,7 +331,6 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
   if (!success) return;
 
   if (hasLocations) {
-    const latest = ingest!.toSend[ingest!.toSend.length - 1];
     if (ingest!.remaining.length === 0) {
       await clearBuffer();
     } else {
@@ -373,13 +339,9 @@ async function sendTelemetry(deviceId: string, force: boolean): Promise<void> {
         JSON.stringify(ingest!.remaining),
       );
     }
-    await setLastSent(latest.latitude, latest.longitude, latest.accuracy);
-  } else {
-    // Heartbeat-only: bump lastSent.t để rate-limit heartbeat kế tiếp.
-    // KHÔNG đổi lastSent.lat/lon/acc (vị trí thật vẫn ở fix gần nhất).
-    const last = await getLastSent();
-    await setLastSent(last?.lat ?? 0, last?.lon ?? 0, last?.acc);
   }
+  // Bump lastSentAt cả ingest lẫn heartbeat để throttle heartbeat kế tiếp.
+  lastSentAt = Date.now();
 }
 
 interface TaskData {
@@ -650,7 +612,91 @@ async function applyLocationParams(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[fg-location] startLocationUpdatesAsync failed:', msg);
+    logRemote.error('startLocationUpdatesAsync failed', err, { distanceInterval });
     return { ok: false, reason: msg };
+  }
+}
+
+/**
+ * On-demand fix — gửi ngay 1 fix tươi không qua OS task wake cycle. Dùng khi
+ * admin gửi command `request_location_now` muốn vị trí tức thì thay vì chờ
+ * task fire tiếp theo (5-30s tùy activity).
+ *
+ * Trả lat/lon đã gửi để command result báo về admin, hoặc null nếu fail
+ * (mất GPS, mất permission, network down).
+ */
+export async function requestImmediateSend(): Promise<{
+  lat: number;
+  lon: number;
+} | null> {
+  try {
+    const deviceId = await loadStoredDeviceId();
+    if (!deviceId) return null;
+
+    const fix = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+    const acc = fix.coords.accuracy ?? null;
+    if (acc != null && acc > MAX_ACCEPTABLE_ACCURACY_M) return null;
+
+    const ts = fix.timestamp ?? Date.now();
+    if (lastFixTime == null || ts > lastFixTime) lastFixTime = ts;
+
+    const batteryLevel = await readBatteryLevel();
+    const cellTowers = await getCachedCells();
+    const activity = getCurrentActivity();
+    const activityConfidence = getCurrentConfidence();
+
+    const payload: {
+      locations: LocationData[];
+      cellTowers?: typeof cellTowers;
+      batteryLevel?: number;
+      lastFixAt?: number;
+      activity?: Activity;
+      activityConfidence?: number;
+    } = {
+      locations: [
+        {
+          latitude: fix.coords.latitude,
+          longitude: fix.coords.longitude,
+          accuracy: acc ?? undefined,
+          quality: classifyQuality(acc),
+          timestamp: ts,
+        },
+      ],
+      cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
+      batteryLevel,
+      lastFixAt: ts,
+    };
+    if (activity !== 'UNKNOWN') {
+      payload.activity = activity;
+      payload.activityConfidence = activityConfidence;
+    }
+
+    // Foreground: ưu tiên MQTT, fallback HTTP qua NativeIngest.
+    let success = false;
+    if (isAppForeground) {
+      success = await publishTelemetry(deviceId, payload, 1);
+    }
+    if (!success && NativeIngest) {
+      try {
+        const status = await NativeIngest.postJson(
+          `${API_BASE_URL}${API_ENDPOINTS.INGEST}`,
+          { 'Content-Type': 'application/json', 'x-device-id': deviceId },
+          JSON.stringify(payload),
+          8_000,
+        );
+        success = status >= 200 && status < 300;
+      } catch {
+        // fall through
+      }
+    }
+
+    if (!success) return null;
+    lastSentAt = Date.now();
+    return { lat: fix.coords.latitude, lon: fix.coords.longitude };
+  } catch {
+    return null;
   }
 }
 
@@ -667,8 +713,8 @@ export async function stopForegroundLocation(): Promise<void> {
   }
   await stopActivityRecognition();
   await clearBuffer();
-  await AsyncStorage.removeItem(STORAGE_KEY_LAST_SENT);
   cellCache = null;
   lastFixTime = null;
+  lastSentAt = 0;
   currentDistanceInterval = -1;
 }

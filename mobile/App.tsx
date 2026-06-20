@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -23,7 +24,10 @@ import {
 } from './src/services/socketService';
 import { disconnectMqtt } from './src/services/mqttService';
 import PairScreen from './src/screens/PairScreen';
+import PermissionScreen from './src/screens/PermissionScreen';
 import TrackingScreen from './src/screens/TrackingScreen';
+
+const STORAGE_KEY_PERMS_ACKED = '@deviceTracking/permsAcked';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -43,12 +47,26 @@ function AppContent() {
   const { registrationStatus, storedData, clearDeviceData } = useDeviceInfo();
   const [isLocked, setIsLocked] = useState(false);
   const [lockChecking, setLockChecking] = useState(true);
+  // permsAcked = user đã đi qua PermissionScreen ít nhất 1 lần. Lưu trong
+  // AsyncStorage để không lặp lại popup quyền mỗi lần mở app.
+  const [permsAcked, setPermsAcked] = useState<boolean | null>(null);
   const alarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY_PERMS_ACKED)
+      .then((v) => setPermsAcked(v === '1'))
+      .catch(() => setPermsAcked(false));
+  }, []);
+
+  const handlePermissionsContinue = useCallback(() => {
+    void AsyncStorage.setItem(STORAGE_KEY_PERMS_ACKED, '1');
+    setPermsAcked(true);
+  }, []);
+
   // Keep the Socket.IO connection open for the lifetime of the app once
-  // the device is registered — every screen that listens for `device_moved`
-  // or `command` reuses the same singleton. Also join the device-scoped room
-  // so this device receives commands addressed to it.
+  // the device is registered — listeners cho `command`, `geofence_breach`,
+  // `device_lock_changed`, `device_deleted` reuse cùng singleton. Cũng join
+  // device-scoped room để device này nhận command addressed tới.
   useEffect(() => {
     if (registrationStatus !== 'registered' || !storedData?.deviceId) return;
     connectSocket();
@@ -116,7 +134,7 @@ function AppContent() {
       void clearDeviceData();
       Alert.alert(
         'Thiết bị đã bị huỷ',
-        'Phụ huynh đã huỷ ghép thiết bị này. Vui lòng ghép lại để tiếp tục sử dụng.',
+        'Người quản lý đã huỷ ghép thiết bị này. Vui lòng ghép lại để tiếp tục sử dụng.',
       );
     });
   }, [registrationStatus, storedData?.deviceId, clearDeviceData]);
@@ -164,11 +182,26 @@ function AppContent() {
     };
   }, []);
 
-  if (registrationStatus === 'loading' || (registrationStatus === 'registered' && lockChecking)) {
+  if (
+    registrationStatus === 'loading' ||
+    permsAcked === null ||
+    (registrationStatus === 'registered' && lockChecking)
+  ) {
     return (
       <View style={styles.loader}>
         <ActivityIndicator size="large" color="#1976D2" />
       </View>
+    );
+  }
+
+  // PermissionScreen ưu tiên cao nhất — chưa qua → block mọi screen khác.
+  // Đảm bảo user grant đủ quyền trước khi vào Pair/Tracking flow.
+  if (!permsAcked) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="auto" />
+        <PermissionScreen onContinue={handlePermissionsContinue} />
+      </SafeAreaProvider>
     );
   }
 

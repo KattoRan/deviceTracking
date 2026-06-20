@@ -230,31 +230,6 @@ function Field({
   );
 }
 
-function ChoiceButton({
-  label,
-  active,
-  onPress,
-  disabled,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.choice, active && styles.choiceActive]}
-      onPress={onPress}
-      disabled={disabled}
-      activeOpacity={0.7}
-    >
-      <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F5F5' },
   content: { padding: 16, paddingBottom: 40 },
@@ -311,23 +286,6 @@ const styles = StyleSheet.create({
   inputError: { borderColor: '#F44336', backgroundColor: '#FFF5F5' },
   errorText: { color: '#F44336', fontSize: 12, marginTop: 4 },
   hintText: { color: '#999', fontSize: 12, marginTop: 4 },
-  choiceRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  choice: {
-    flex: 1,
-    paddingVertical: 14,
-    borderWidth: 2,
-    borderColor: '#DDD',
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: '#FAFAFA',
-  },
-  choiceActive: { borderColor: '#1976D2', backgroundColor: '#E3F2FD' },
-  choiceText: { fontSize: 15, fontWeight: '600', color: '#666' },
-  choiceTextActive: { color: '#1976D2' },
   submit: {
     backgroundColor: '#1976D2',
     borderRadius: 12,

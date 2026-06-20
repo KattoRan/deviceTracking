@@ -1,4 +1,3 @@
-import { useFocusEffect } from '@react-navigation/native';
 import * as Battery from 'expo-battery';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -16,26 +15,18 @@ import {
 import SosButton from '../components/SosButton';
 import { useDeviceInfo } from '../hooks/useDeviceInfo';
 import { useLocation } from '../hooks/useLocation';
-import type {
-  CellTower,
-  CommandDispatchEvent,
-  IngestPayload,
-  LocationData,
-} from '../models/types';
+import type { CommandDispatchEvent } from '../models/types';
+import { fetchAdminContact } from '../services/apiService';
 import {
-  fetchAdminContact,
-  sendIngestData,
-} from '../services/apiService';
-import { getCellTowerInfo } from '../services/cellInfoService';
+  getCurrentActivity,
+  onActivityChange,
+  type Activity,
+} from '../services/activityService';
 import {
+  requestImmediateSend,
   startForegroundLocation,
-  stopForegroundLocation,
 } from '../services/foregroundLocationService';
-import {
-  connectMqtt,
-  disconnectMqtt,
-  publishTelemetry,
-} from '../services/mqttService';
+import { connectMqtt, disconnectMqtt } from '../services/mqttService';
 import {
   ackCommand,
   onCommand,
@@ -47,6 +38,24 @@ interface AdminContact {
   phoneNumber: string | null;
 }
 
+const ACTIVITY_ICON: Record<Activity, string> = {
+  STILL: '⏸️',
+  WALKING: '🚶',
+  RUNNING: '🏃',
+  ON_BICYCLE: '🚴',
+  IN_VEHICLE: '🚗',
+  UNKNOWN: '❓',
+};
+
+const ACTIVITY_LABEL: Record<Activity, string> = {
+  STILL: 'Đứng yên',
+  WALKING: 'Đang đi bộ',
+  RUNNING: 'Đang chạy',
+  ON_BICYCLE: 'Đang đi xe đạp',
+  IN_VEHICLE: 'Đang lái xe',
+  UNKNOWN: 'Đang xác định...',
+};
+
 export default function TrackingScreen() {
   const { storedData } = useDeviceInfo();
   const {
@@ -55,113 +64,30 @@ export default function TrackingScreen() {
     hasPermission,
     requestPermission,
     startWatching,
-    stopWatching,
-    refreshLocation,
   } = useLocation();
 
   const [isActive, setIsActive] = useState(false);
-  // Khi foreground service đang chạy → service làm source duy nhất gửi
-  // /ingest. In-activity tick interval skip để tránh duplicate location_history.
-  // useLocation hook vẫn watch để cấp `location` cho UI (SosButton lastKnown).
-  const [serviceActive, setServiceActive] = useState(false);
   const [adminContact, setAdminContact] = useState<AdminContact | null>(null);
   const [contactLoading, setContactLoading] = useState(true);
+  const [battery, setBattery] = useState<number | null>(null);
+  const [activity, setActivity] = useState<Activity>('UNKNOWN');
   const [sosResult, setSosResult] = useState<{
     state: 'success' | 'error';
     message: string;
   } | null>(null);
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isActiveRef = useRef(false);
   // Once-per-mount guard so the auto-start effect doesn't re-fire when
-  // unrelated callback deps (permission state, sendTelemetry identity, …)
-  // change. A fresh mount — e.g. after re-registering — resets it to false.
+  // unrelated callback deps change. A fresh mount — e.g. after re-registering
+  // — resets it to false.
   const autoStartedRef = useRef(false);
-  // Accumulates every fix the watcher pushes during one send window. The
-  // periodic timer drains this on each tick and ships the whole trajectory
-  // in one payload — so server gets every waypoint, not just the latest.
-  const bufferRef = useRef<LocationData[]>([]);
-  // Fallback used when the buffer is empty at flush time (user stood still
-  // and the OS produced no fix in the window). Resending the last known
-  // fix keeps the device alive on the server without forcing a cold GPS read.
-  const lastKnownRef = useRef<LocationData | null>(null);
+  // True khi foreground service đã start thành công. False = thiếu permission
+  // hoặc lỗi → cho phép retry khi user quay lại từ Settings.
+  const serviceActiveRef = useRef(false);
 
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
-
-  useEffect(() => {
-    if (!location) return;
-    // Dedup: refreshLocation() pushes into the buffer directly too, so the
-    // resulting setLocation(...) would otherwise re-add the same fix.
-    const last = bufferRef.current[bufferRef.current.length - 1];
-    if (!last || last.timestamp !== location.timestamp) {
-      bufferRef.current.push(location);
-    }
-    lastKnownRef.current = location;
-  }, [location]);
-
-  const sendTelemetry = useCallback(
-    async (options: { forceFresh?: boolean } = {}) => {
-      if (!storedData?.deviceId) return null;
-
-      try {
-        // Explicit triggers (start, resume, on-demand command) — and the very
-        // first tick before the watcher has produced anything — force a fresh
-        // one-shot fix. The buffer accumulates passively from the watcher.
-        if (options.forceFresh || lastKnownRef.current == null) {
-          const fresh = await refreshLocation();
-          if (fresh) {
-            const last = bufferRef.current[bufferRef.current.length - 1];
-            if (!last || last.timestamp !== fresh.timestamp) {
-              bufferRef.current.push(fresh);
-            }
-            lastKnownRef.current = fresh;
-          }
-        }
-
-        // Atomically take everything the watcher pushed during this window.
-        const batch = bufferRef.current;
-        bufferRef.current = [];
-
-        let batteryLevel: number | undefined;
-        try {
-          const lvl = await Battery.getBatteryLevelAsync();
-          batteryLevel = Math.round(lvl * 100);
-        } catch {
-          // expo-battery có thể fail trên simulator hoặc Expo Go cũ — bỏ qua.
-        }
-
-        // Unified payload — server tự branch dựa trên có/không có locations.
-        // `lastFixAt` luôn gửi nếu có fix → FE biết "GPS thực sự hoạt động"
-        // chính xác kể cả khi batch empty.
-        let cellTowers: CellTower[] = [];
-        try {
-          cellTowers = await getCellTowerInfo();
-        } catch {
-          // cell sample fail — gửi không cells, không critical
-        }
-        const payload: IngestPayload = {
-          batteryLevel,
-          cellTowers: cellTowers.length > 0 ? cellTowers : undefined,
-          lastFixAt: lastKnownRef.current?.timestamp,
-        };
-        if (batch.length > 0) payload.locations = batch;
-
-        const sentOverMqtt = await publishTelemetry(storedData.deviceId, payload);
-        if (!sentOverMqtt) {
-          await sendIngestData(storedData.deviceId, payload);
-        }
-
-        return batch.length > 0 ? batch[batch.length - 1] : null;
-      } catch {
-        // network / GPS errors are non-fatal — the next tick will retry
-        return null;
-      }
-    },
-    [storedData, refreshLocation],
-  );
 
   const startTracking = useCallback(async () => {
     if (!storedData?.deviceId) return false;
@@ -176,16 +102,14 @@ export default function TrackingScreen() {
     const watching = await startWatching();
     if (!watching) return false;
 
-    bufferRef.current = [];
-    lastKnownRef.current = null;
     setIsActive(true);
 
-    // Khởi tạo foreground service — service tiếp tục gửi telemetry khi user
-    // minimize app / khóa màn hình. Service success thì in-activity tick
-    // sẽ skip để tránh duplicate location_history (xem effect bên dưới).
+    // Foreground service là source duy nhất gửi telemetry — tiếp tục chạy
+    // khi user minimize app / khoá màn hình. useLocation watcher chỉ phục
+    // vụ UI hiện location + SosButton lastKnown.
     const fgRes = await startForegroundLocation();
     if (fgRes.ok) {
-      setServiceActive(true);
+      serviceActiveRef.current = true;
     } else {
       console.warn('[tracking] foreground service start failed:', fgRes.reason);
       Alert.alert(
@@ -197,25 +121,8 @@ export default function TrackingScreen() {
         ],
       );
     }
-
-    // Fire once immediately so the server sees a fresh fix without waiting.
-    // Service cũng sẽ flush ngay sau khi register nên có thể duplicate fix
-    // đầu tiên — chấp nhận để có UX "ngay lập tức thấy device online".
-    await sendTelemetry({ forceFresh: true });
     return true;
-  }, [storedData, hasPermission, requestPermission, startWatching, sendTelemetry]);
-
-  const stopTracking = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    stopWatching();
-    void stopForegroundLocation();
-    setServiceActive(false);
-    disconnectMqtt();
-    setIsActive(false);
-  }, [stopWatching]);
+  }, [storedData, hasPermission, requestPermission, startWatching]);
 
   // Auto-start tracking the moment the screen has a deviceId — there is no
   // longer a Home screen between Register and Tracking, so the user lands
@@ -226,23 +133,6 @@ export default function TrackingScreen() {
     autoStartedRef.current = true;
     void startTracking();
   }, [storedData?.deviceId, startTracking]);
-
-  // Flush buffer mỗi 30s khi app đang foreground và service chưa chạy.
-  // Skip nếu foreground service đang chạy: TaskManager task đã tự flush,
-  // tránh duplicate /ingest call.
-  useEffect(() => {
-    if (!isActive || serviceActive) return;
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(() => {
-      void sendTelemetry();
-    }, 30_000);
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [isActive, serviceActive, sendTelemetry]);
 
   // Fetch admin contact info once we have a deviceId. Showing admin name
   // and phone on this screen so the monitored person can always call back
@@ -266,12 +156,9 @@ export default function TrackingScreen() {
     };
   }, [storedData?.deviceId]);
 
-  // Re-fetch khi app trở lại foreground để người quản lý đổi sđt trên web là
-  // mobile thấy lần sau mở app. Dùng prev-state riêng — không share
-  // `appStateRef` với listener telemetry để tránh race khi cả 2 listener
-  // cùng fire trên 1 event (thứ tự không đảm bảo).
-  // Nếu serviceActive=false (service chưa start được, vd do thiếu permission),
-  // thử lại khi app quay về foreground — user có thể đã grant permission từ Settings.
+  // Khi app trở lại foreground: re-fetch admin contact (user có thể vừa
+  // đổi sđt trên web) + retry service start nếu trước đó fail (vd thiếu
+  // permission — user có thể đã grant từ Settings).
   useEffect(() => {
     if (!storedData?.deviceId) return;
     const deviceId = storedData.deviceId;
@@ -283,16 +170,15 @@ export default function TrackingScreen() {
         fetchAdminContact(deviceId)
           .then((info) => setAdminContact(info))
           .catch(() => undefined);
-        // Retry service start nếu trước đó bị từ chối permission.
-        if (isActiveRef.current && !serviceActive) {
+        if (isActiveRef.current && !serviceActiveRef.current) {
           void startForegroundLocation().then((res) => {
-            if (res.ok) setServiceActive(true);
+            if (res.ok) serviceActiveRef.current = true;
           });
         }
       }
     });
     return () => sub.remove();
-  }, [storedData?.deviceId, serviceActive]);
+  }, [storedData?.deviceId]);
 
   // Auto-dismiss SOS feedback after 3s.
   useEffect(() => {
@@ -309,12 +195,12 @@ export default function TrackingScreen() {
     return onCommand(async (event: CommandDispatchEvent) => {
       if (event.command === 'request_location_now') {
         ackCommand(event.commandId);
-        const current = await sendTelemetry({ forceFresh: true });
+        const current = await requestImmediateSend();
         if (current) {
           sendCommandResult({
             commandId: event.commandId,
             success: true,
-            data: { lat: current.latitude, lon: current.longitude },
+            data: { lat: current.lat, lon: current.lon },
           });
         } else {
           sendCommandResult({
@@ -325,34 +211,38 @@ export default function TrackingScreen() {
         }
       }
     });
-  }, [storedData, sendTelemetry]);
+  }, [storedData]);
 
-  useFocusEffect(
-    useCallback(() => {
-      // Re-flush a fresh fix the moment the screen comes into focus so the
-      // parent's dashboard sees a recent point even after a background pause.
-      if (storedData?.deviceId && isActiveRef.current) {
-        void sendTelemetry({ forceFresh: true });
-      }
-    }, [storedData, sendTelemetry]),
-  );
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      const prev = appStateRef.current;
-      appStateRef.current = next;
-      if (isActive && prev.match(/inactive|background/) && next === 'active') {
-        void sendTelemetry({ forceFresh: true });
-      }
-    });
-    return () => sub.remove();
-  }, [isActive, sendTelemetry]);
-
+  // Cleanup MQTT khi unmount.
   useEffect(() => {
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
       disconnectMqtt();
     };
+  }, []);
+
+  // Poll battery mỗi 60s — hiện UI cảnh báo khi <20%.
+  useEffect(() => {
+    let cancelled = false;
+    async function read() {
+      try {
+        const lvl = await Battery.getBatteryLevelAsync();
+        if (!cancelled) setBattery(Math.round(lvl * 100));
+      } catch {
+        if (!cancelled) setBattery(null);
+      }
+    }
+    void read();
+    const id = setInterval(read, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Activity subscription — hiện UI realtime để user biết app đang detect gì.
+  useEffect(() => {
+    setActivity(getCurrentActivity());
+    return onActivityChange((next) => setActivity(next));
   }, []);
 
   const handleCallAdmin = useCallback(() => {
@@ -419,9 +309,46 @@ export default function TrackingScreen() {
               </Text>
             </View>
           </View>
+
+          <View style={styles.statusGrid}>
+            <View style={styles.statusCell}>
+              <Text style={styles.statusLabel}>Hoạt động</Text>
+              <Text style={styles.statusValue}>
+                {ACTIVITY_ICON[activity]} {ACTIVITY_LABEL[activity]}
+              </Text>
+            </View>
+            <View style={styles.statusCell}>
+              <Text style={styles.statusLabel}>GPS</Text>
+              <Text style={styles.statusValue}>
+                {location
+                  ? `±${Math.round(location.accuracy ?? 0)}m`
+                  : 'Đang tìm vệ tinh...'}
+              </Text>
+            </View>
+            <View style={styles.statusCell}>
+              <Text style={styles.statusLabel}>Pin</Text>
+              <Text
+                style={[
+                  styles.statusValue,
+                  battery != null && battery < 20 && styles.statusValueWarn,
+                ]}
+              >
+                {battery != null ? `${battery}%` : '--'}
+              </Text>
+            </View>
+          </View>
+
+          {battery != null && battery < 20 && (
+            <View style={styles.batteryWarn}>
+              <Text style={styles.batteryWarnText}>
+                ⚠️ Pin yếu ({battery}%) — vui lòng cắm sạc để duy trì giám sát.
+              </Text>
+            </View>
+          )}
+
           <Text style={styles.placeholder}>
             {isActive
-              ? 'Đang gửi vị trí khi di chuyển và heartbeat mỗi 30s.'
+              ? 'Tự động gửi vị trí khi di chuyển + heartbeat khi đứng yên.'
               : 'Mở ứng dụng để tiếp tục gửi vị trí thời gian thực.'}
           </Text>
         </View>
@@ -525,6 +452,41 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: { color: '#D32F2F', fontSize: 13 },
+  statusGrid: {
+    flexDirection: 'row',
+    marginVertical: 12,
+    gap: 8,
+  },
+  statusCell: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  statusLabel: {
+    fontSize: 11,
+    color: '#999',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  statusValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+  },
+  statusValueWarn: { color: '#F44336' },
+  batteryWarn: {
+    backgroundColor: '#FFF3E0',
+    borderLeftWidth: 3,
+    borderLeftColor: '#F44336',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+  },
+  batteryWarnText: { color: '#E65100', fontSize: 13, fontWeight: '500' },
   placeholder: {
     color: '#999',
     fontSize: 14,
