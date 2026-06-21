@@ -45,6 +45,7 @@ export function connectSocket(): Socket {
     reconnectionAttempts: SOCKET_CONFIG.options.reconnectionAttempts,
     reconnectionDelay: SOCKET_CONFIG.options.reconnectionDelay,
     reconnectionDelayMax: SOCKET_CONFIG.options.reconnectionDelayMax,
+    query: { clientType: 'mobile' },
   });
 
   // Surface lỗi kết nối ra log — nếu URL sai, firewall chặn, hoặc backend

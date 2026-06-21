@@ -261,6 +261,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1_000,
       reconnectionDelayMax: 10_000,
+      query: { clientType: "web" },
     });
 
     socket.on("geofence_breach", (event: GeofenceBreachEvent) => {

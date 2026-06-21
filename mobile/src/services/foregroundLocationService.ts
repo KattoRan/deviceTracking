@@ -35,33 +35,37 @@ const ACCURACY_APPROX_M = 80;
 const MAX_ACCEPTABLE_ACCURACY_M = 200;
 
 // H1 — Event-driven sampling theo activity:
-// - OS fire task khi di chuyển đủ distanceInterval (theo activity hiện tại),
-//   HOẶC khi LOCATION_TIME_INTERVAL_MS trôi qua (heartbeat fallback).
+// - OS fire task khi di chuyển đủ distanceInterval HOẶC khi timeInterval trôi
+//   qua (heartbeat fallback), CẢ HAI tham số đều thay đổi theo activity.
 // - Activity Recognition (Google ML) classify STILL/WALKING/RUNNING/BICYCLE/VEHICLE,
-//   ở mỗi lần đổi state ta reschedule Location updates với distanceInterval phù hợp.
+//   mỗi lần đổi state ta reschedule Location updates với cả 2 tham số mới.
 // - Movement gate app-level đã bỏ — OS đảm nhiệm filter distance.
 //
-// timeInterval=30s: giúp GPS chip stay "warm" khi STILL — không cold-start
-// 5-10s khi user bắt đầu di chuyển. Trade-off: heartbeat dày hơn (120/h thay
-// vì 60/h khi đứng yên 1h) → tăng nhẹ pin nhưng đảm bảo fix đầu sau STILL
-// chính xác sớm.
-const LOCATION_TIME_INTERVAL_MS = 30_000;
-const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
-
-// distanceInterval (m) theo activity. STILL + UNKNOWN dùng 0 vì Android
-// FusedLocationProvider throttle time-based delivery khi smallestDisplacement
-// > 0 và device chưa move đủ — đặt 0 để heartbeat luôn fire mỗi timeInterval.
-// MOVING tăng threshold theo tốc độ tự nhiên: walking dense, vehicle thưa hơn
-// để tránh ingest spam khi đi xe nhanh. Khi user đi xe rồi dừng đèn đỏ,
-// ActivityTransition sẽ detect STILL trong 1-3s và reschedule về 0.
+// distanceInterval (m): STILL + UNKNOWN = 0 vì Android FusedLocationProvider
+// throttle time-based delivery khi smallestDisplacement > 0 và device chưa
+// move đủ — đặt 0 để task vẫn fire mỗi timeInterval khi đứng yên. MOVING
+// tăng threshold theo tốc độ tự nhiên: walking dense, vehicle thưa hơn.
+//
+// timeInterval (ms): giảm dần khi activity intensify để FE marker mượt hơn
+// ở tốc độ cao. STILL giữ 30s (chỉ liveness), IN_VEHICLE giảm xuống 5s để
+// khi đứng đèn đỏ admin vẫn thấy cập nhật mỗi 5s thay vì đợi 30s.
 const DISTANCE_BY_ACTIVITY: Record<Activity, number> = {
-  STILL: 0,          // time-only — heartbeat reliable
-  UNKNOWN: 0,        // conservative until classifier identifies
+  STILL: 0,
+  UNKNOWN: 0,
   WALKING: 5,
   RUNNING: 10,
   ON_BICYCLE: 15,
   IN_VEHICLE: 25,
 };
+const TIME_BY_ACTIVITY: Record<Activity, number> = {
+  STILL: 30_000,
+  UNKNOWN: 30_000,
+  WALKING: 20_000,
+  RUNNING: 15_000,
+  ON_BICYCLE: 10_000,
+  IN_VEHICLE: 5_000,
+};
+const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
 // H2 — Cell info cache: Telephony scan ~50-200ms mỗi lần, ở interval 5s
 // gọi 12 lần/phút rất tốn. Cells thay đổi rất chậm (handover ~vài phút) →
@@ -451,6 +455,7 @@ TaskManager.defineTask(FOREGROUND_LOCATION_TASK, async ({ data, error }) => {
 // Module-level state: distanceInterval đang dùng, để biết khi nào cần
 // re-register Location updates (tránh restart liên tục khi activity vẫn cùng tier).
 let currentDistanceInterval = -1;
+let currentTimeInterval = -1;
 let activityUnsubscribe: (() => void) | null = null;
 
 /**
@@ -479,47 +484,72 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
   }
   activityUnsubscribe = onActivityChange((activity) => {
     const newDistance = DISTANCE_BY_ACTIVITY[activity];
-    if (newDistance === currentDistanceInterval) return;
-    console.log(`[fg-location] activity=${activity} → distanceInterval=${newDistance}m`);
-    void applyLocationParams(newDistance);
+    const newTime = TIME_BY_ACTIVITY[activity];
+    if (
+      newDistance === currentDistanceInterval &&
+      newTime === currentTimeInterval
+    ) return;
+    console.log(`[fg-location] activity=${activity} → distance=${newDistance}m time=${newTime}ms`);
+    void applyLocationParams(newDistance, newTime);
   });
 
+  const initial = getCurrentActivity();
   return applyLocationParams(
-    DISTANCE_BY_ACTIVITY[getCurrentActivity()],
+    DISTANCE_BY_ACTIVITY[initial],
+    TIME_BY_ACTIVITY[initial],
   );
 }
 
 /**
- * Register Location updates với distanceInterval cụ thể. Idempotent —
- * gọi lại khi đã có task sẽ chỉ setOptions native, không gap tracking.
+ * Register Location updates với distanceInterval + timeInterval cụ thể.
+ * Idempotent — gọi lại khi đã có task sẽ chỉ setOptions native, không gap
+ * tracking.
  */
 async function applyLocationParams(
   distanceInterval: number,
+  timeInterval: number,
 ): Promise<{ ok: boolean; reason?: string }> {
+  const opts = {
+    accuracy: Location.Accuracy.High,
+    distanceInterval,
+    timeInterval,
+    deferredUpdatesInterval: 0,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: '📍 Đang giám sát vị trí',
+      notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản quản lý.',
+      notificationColor: '#1976D2',
+      killServiceOnDestroy: false,
+    },
+    pausesUpdatesAutomatically: false,
+    activityType: Location.ActivityType.OtherNavigation,
+  };
   try {
-    await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
-      accuracy: Location.Accuracy.High,
-      distanceInterval,
-      timeInterval: LOCATION_TIME_INTERVAL_MS,  // heartbeat fallback 60s
-      deferredUpdatesInterval: 0,                // không cho OS defer
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: '📍 Đang giám sát vị trí',
-        notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản quản lý.',
-        notificationColor: '#1976D2',
-        killServiceOnDestroy: false,
-      },
-      pausesUpdatesAutomatically: false,
-      activityType: Location.ActivityType.OtherNavigation,
-    });
+    await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, opts);
     currentDistanceInterval = distanceInterval;
-    console.log(`[fg-location] startLocationUpdatesAsync OK distance=${distanceInterval}m`);
+    currentTimeInterval = timeInterval;
+    console.log(`[fg-location] startLocationUpdatesAsync OK distance=${distanceInterval}m time=${timeInterval}ms`);
     return { ok: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[fg-location] startLocationUpdatesAsync failed:', msg);
-    logRemote.error('startLocationUpdatesAsync failed', err, { distanceInterval });
-    return { ok: false, reason: msg };
+    // Retry sau khi stop — expo-location đôi khi NPE SharedPreferences nếu
+    // task đã register nhưng state init chưa xong, hoặc process trước crash
+    // để lại pref lock. Stop trước rồi start lại flush state.
+    console.warn(`[fg-location] start failed, retrying after stop:`, err instanceof Error ? err.message : String(err));
+    try {
+      await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
+    } catch { /* ignore — task có thể chưa register */ }
+    try {
+      await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, opts);
+      currentDistanceInterval = distanceInterval;
+      currentTimeInterval = timeInterval;
+      console.log(`[fg-location] startLocationUpdatesAsync OK (retry) distance=${distanceInterval}m time=${timeInterval}ms`);
+      return { ok: true };
+    } catch (retryErr) {
+      const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      console.error('[fg-location] startLocationUpdatesAsync failed after retry:', msg);
+      logRemote.error('startLocationUpdatesAsync failed', retryErr, { distanceInterval, timeInterval });
+      return { ok: false, reason: msg };
+    }
   }
 }
 
@@ -622,4 +652,5 @@ export async function stopForegroundLocation(): Promise<void> {
   lastFixTime = null;
   lastSentAt = 0;
   currentDistanceInterval = -1;
+  currentTimeInterval = -1;
 }

@@ -158,13 +158,23 @@ export class EventsGateway
   }
 
   handleConnection(client: Socket) {
+    // Phân biệt mobile vs web qua handshake query `clientType`. FE Next.js
+    // gửi `clientType=web`; mobile RN gửi `clientType=mobile`. Mặc định
+    // `unknown` để không vỡ legacy client cũ chưa nâng cấp.
+    const clientType =
+      (client.handshake.query.clientType as string | undefined) ?? 'unknown';
+    client.data.clientType = clientType;
     this.logger.log(
-      `Client connected: ${client.id} transport=${client.conn.transport.name}`,
+      `[${clientType}] connected: ${client.id} transport=${client.conn.transport.name}`,
     );
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
+    const tag = (client.data.clientType as string | undefined) ?? '?';
+    const device = (client.data.deviceId as string | undefined) ?? '';
+    this.logger.log(
+      `[${tag}] disconnected: ${client.id}${device ? ` device=${device}` : ''}`,
+    );
   }
 
   /**
@@ -180,8 +190,9 @@ export class EventsGateway
     const deviceId =
       typeof body === 'string' ? body : body?.deviceId?.trim() || '';
     if (!deviceId) return { ok: false };
+    client.data.deviceId = deviceId;
     void client.join(deviceRoom(deviceId));
-    this.logger.log(`Socket ${client.id} joined ${deviceRoom(deviceId)}`);
+    this.logger.log(`[mobile] device=${deviceId} joined room ${deviceRoom(deviceId)}`);
     return { ok: true };
   }
 
