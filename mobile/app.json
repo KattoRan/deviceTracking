@@ -48,7 +48,8 @@
           "isAndroidForegroundServiceEnabled": true,
           "isAndroidBackgroundLocationEnabled": true
         }
-      ]
+      ],
+      "./plugins/withStopWithTask"
     ]
   }
 }

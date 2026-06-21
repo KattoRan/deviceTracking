@@ -519,7 +519,9 @@ async function applyLocationParams(
       notificationTitle: '📍 Đang giám sát vị trí',
       notificationBody: 'Ứng dụng đang gửi vị trí về tài khoản quản lý.',
       notificationColor: '#1976D2',
-      killServiceOnDestroy: false,
+      // true → vuốt app khỏi recents / app bị destroy thì dừng luôn foreground
+      // service, không gửi dữ liệu nữa (kết hợp android:stopWithTask="true").
+      killServiceOnDestroy: true,
     },
     pausesUpdatesAutomatically: false,
     activityType: Location.ActivityType.OtherNavigation,
