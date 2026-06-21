@@ -115,6 +115,13 @@ interface MonitoringAlertsContextValue {
   sos: SosAlertItem[];
   lowBattery: LowBatterySocketEvent[];
   offline: OfflineSocketEvent[];
+  /**
+   * Trạng thái mất kết nối của thiết bị (connectivity truth), tách biệt với
+   * danh sách thông báo `offline`. Thêm khi nhận `device_offline`, xoá khi
+   * `device_moved` (thiết bị online trở lại). KHÔNG bị `dismissOffline` xoá —
+   * tắt thông báo chỉ ẩn toast, không đổi trạng thái thiết bị.
+   */
+  offlineStatusIds: Set<string>;
   alerts: MonitoringAlert[];
   returned: ReturnedToast[];
   dismissReturned: (uid: string) => void;
@@ -171,6 +178,11 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
   >(() => new Map());
   const [offlineMap, setOfflineMap] = useState<Map<string, OfflineSocketEvent>>(
     () => new Map(),
+  );
+  // Connectivity truth — độc lập với offlineMap (danh sách thông báo có thể
+  // tắt). Chỉ device_moved mới xoá khỏi đây; dismissOffline không đụng tới.
+  const [offlineStatusIds, setOfflineStatusIds] = useState<Set<string>>(
+    () => new Set(),
   );
   const [returned, setReturned] = useState<ReturnedToast[]>([]);
   const deviceMovedHandlersRef = useRef<Set<DeviceMovedHandler>>(new Set());
@@ -336,6 +348,12 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
         next.set(event.deviceId, event);
         return next;
       });
+      setOfflineStatusIds((prev) => {
+        if (prev.has(event.deviceId)) return prev;
+        const next = new Set(prev);
+        next.add(event.deviceId);
+        return next;
+      });
     });
 
     // Auto-clear: pin sạc lại ≥25 → BE silently flip flag, FE tự dọn cảnh báo
@@ -357,6 +375,12 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       setOfflineMap((prev) => {
         if (!prev.has(event.deviceId)) return prev;
         const next = new Map(prev);
+        next.delete(event.deviceId);
+        return next;
+      });
+      setOfflineStatusIds((prev) => {
+        if (!prev.has(event.deviceId)) return prev;
+        const next = new Set(prev);
         next.delete(event.deviceId);
         return next;
       });
@@ -453,6 +477,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       sos,
       lowBattery,
       offline,
+      offlineStatusIds,
       alerts,
       returned,
       dismissReturned,
@@ -468,6 +493,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       sos,
       lowBattery,
       offline,
+      offlineStatusIds,
       alerts,
       returned,
       dismissReturned,

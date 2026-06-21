@@ -138,15 +138,11 @@ function TrackingPageInner() {
   }, []);
   useSocket(handleDeviceMoved);
 
-  // Derive trạng thái offline từ socket dùng chung. Trước đây trang chỉ nghe
-  // `device_moved`, nên khi cron mark device offline marker vẫn "đang hoạt
-  // động" cho tới khi reload. Giờ `offline` từ provider là source of truth →
-  // map nó vào field `status` ngay tại render, không cần useEffect/setState.
-  const { offline } = useGeofenceAlerts();
-  const offlineIds = useMemo(
-    () => new Set(offline.map((o) => o.deviceId)),
-    [offline],
-  );
+  // Derive trạng thái offline từ socket dùng chung. Dùng `offlineStatusIds`
+  // (connectivity truth) thay vì danh sách thông báo `offline`: tắt thông báo
+  // offline chỉ ẩn toast, KHÔNG được làm marker trở lại "online". Chỉ
+  // `device_moved` (thiết bị online thật) mới xoá khỏi tập này.
+  const { offlineStatusIds: offlineIds } = useGeofenceAlerts();
   const effectiveDevices = useMemo<Device[]>(
     () =>
       offlineIds.size === 0
