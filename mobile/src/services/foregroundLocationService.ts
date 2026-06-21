@@ -47,8 +47,9 @@ const MAX_ACCEPTABLE_ACCURACY_M = 200;
 // tăng threshold theo tốc độ tự nhiên: walking dense, vehicle thưa hơn.
 //
 // timeInterval (ms): giảm dần khi activity intensify để FE marker mượt hơn
-// ở tốc độ cao. STILL giữ 30s (chỉ liveness), IN_VEHICLE giảm xuống 5s để
-// khi đứng đèn đỏ admin vẫn thấy cập nhật mỗi 5s thay vì đợi 30s.
+// ở tốc độ cao. STILL giữ 30s (chỉ liveness). IN_VEHICLE và UNKNOWN dùng 5s:
+// vehicle để bắt đứng đèn đỏ, UNKNOWN để không nhảy marker khi AR chưa phân
+// loại được (có thể đang di chuyển).
 const DISTANCE_BY_ACTIVITY: Record<Activity, number> = {
   STILL: 0,
   UNKNOWN: 0,
@@ -59,7 +60,11 @@ const DISTANCE_BY_ACTIVITY: Record<Activity, number> = {
 };
 const TIME_BY_ACTIVITY: Record<Activity, number> = {
   STILL: 30_000,
-  UNKNOWN: 30_000,
+  // UNKNOWN dùng 5s (như IN_VEHICLE) thay vì 30s: khi Activity Recognition
+  // chưa phân loại được (warmup, confidence thấp, hoặc thiếu quyền) thiết bị
+  // có thể đang di chuyển — fire dày để marker không nhảy xa. Đánh đổi pin
+  // khi thực sự đứng yên mà bị kẹt UNKNOWN, chấp nhận được.
+  UNKNOWN: 5_000,
   WALKING: 20_000,
   RUNNING: 15_000,
   ON_BICYCLE: 10_000,
