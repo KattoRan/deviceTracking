@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { io, type Socket } from "socket.io-client";
-import { API_BASE_URL } from "@/lib/api";
+import { useGeofenceAlerts } from "@/components/GeofenceAlerts";
 import type { CommandStatusChangedEvent } from "@/types/command";
 
 interface Handlers {
@@ -10,34 +9,25 @@ interface Handlers {
 }
 
 /**
- * Subscribes to command/status + global-setting broadcasts.
+ * Đăng ký `command_status_changed` qua socket dùng chung của
+ * <GeofenceAlertsProvider>. Trước đây hook tự mở 1 kết nối Socket.IO riêng —
+ * đã hợp nhất để toàn web chỉ có một socket, tránh tốn kết nối + log nhiễu
+ * mỗi lần RemoteControlPanel mount/unmount.
  *
- * Separate from `useSocket` (which handles `device_moved`) so callers that
- * only care about commands don't pay the cost of re-running on device-moved
- * events — and so a tracking page can mount both hooks without conflict.
+ * Handler giữ qua ref nên caller truyền inline mà không gây subscribe lại
+ * theo mỗi render.
  */
 export function useCommandSocket(handlers: Handlers) {
+  const { subscribeCommandStatusChanged } = useGeofenceAlerts();
   const handlersRef = useRef(handlers);
+
   useEffect(() => {
     handlersRef.current = handlers;
   }, [handlers]);
 
   useEffect(() => {
-    const socket: Socket = io(API_BASE_URL, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1_000,
-      reconnectionDelayMax: 10_000,
-    });
-
-    socket.on("command_status_changed", (event: CommandStatusChangedEvent) => {
+    return subscribeCommandStatusChanged((event) => {
       handlersRef.current.onCommandStatusChanged?.(event);
     });
-
-    return () => {
-      socket.off("command_status_changed");
-      socket.disconnect();
-    };
-  }, []);
+  }, [subscribeCommandStatusChanged]);
 }

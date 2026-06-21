@@ -28,8 +28,10 @@ import { sosService, type SosEvent } from "@/services/sosService";
 import { cn } from "@/lib/utils";
 import type { GeofenceBreachEvent } from "@/types/geofence";
 import type { DeviceMovedEvent } from "@/types/device";
+import type { CommandStatusChangedEvent } from "@/types/command";
 
 type DeviceMovedHandler = (event: DeviceMovedEvent) => void;
+type CommandStatusChangedHandler = (event: CommandStatusChangedEvent) => void;
 
 const RETURNED_DISMISS_MS = 6_000;
 let returnedCounter = 0;
@@ -126,6 +128,13 @@ interface MonitoringAlertsContextValue {
    * Trả về hàm gỡ đăng ký. Caller chịu trách nhiệm gọi nó trong cleanup.
    */
   subscribeDeviceMoved: (handler: DeviceMovedHandler) => () => void;
+  /**
+   * Tương tự nhưng cho command_status_changed — dùng chung 1 socket thay vì
+   * mở kết nối riêng cho RemoteControlPanel.
+   */
+  subscribeCommandStatusChanged: (
+    handler: CommandStatusChangedHandler,
+  ) => () => void;
 }
 
 const MonitoringAlertsContext =
@@ -165,12 +174,25 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
   );
   const [returned, setReturned] = useState<ReturnedToast[]>([]);
   const deviceMovedHandlersRef = useRef<Set<DeviceMovedHandler>>(new Set());
+  const commandStatusHandlersRef = useRef<Set<CommandStatusChangedHandler>>(
+    new Set(),
+  );
 
   const subscribeDeviceMoved = useCallback(
     (handler: DeviceMovedHandler) => {
       deviceMovedHandlersRef.current.add(handler);
       return () => {
         deviceMovedHandlersRef.current.delete(handler);
+      };
+    },
+    [],
+  );
+
+  const subscribeCommandStatusChanged = useCallback(
+    (handler: CommandStatusChangedHandler) => {
+      commandStatusHandlersRef.current.add(handler);
+      return () => {
+        commandStatusHandlersRef.current.delete(handler);
       };
     },
     [],
@@ -341,6 +363,15 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       for (const h of deviceMovedHandlersRef.current) h(event);
     });
 
+    // Trạng thái lệnh điều khiển — dispatch cho RemoteControlPanel qua cùng
+    // socket này thay vì để panel mở kết nối riêng.
+    socket.on(
+      "command_status_changed",
+      (event: CommandStatusChangedEvent) => {
+        for (const h of commandStatusHandlersRef.current) h(event);
+      },
+    );
+
     return () => {
       socket.off("geofence_breach");
       socket.off("sos_alert");
@@ -348,6 +379,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       socket.off("device_offline");
       socket.off("battery_update");
       socket.off("device_moved");
+      socket.off("command_status_changed");
       socket.disconnect();
     };
   }, [dismissReturned]);
@@ -429,6 +461,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       dismissLowBattery,
       dismissOffline,
       subscribeDeviceMoved,
+      subscribeCommandStatusChanged,
     }),
     [
       outside,
@@ -443,6 +476,7 @@ export function GeofenceAlertsProvider({ children }: { children: ReactNode }) {
       dismissLowBattery,
       dismissOffline,
       subscribeDeviceMoved,
+      subscribeCommandStatusChanged,
     ],
   );
 
