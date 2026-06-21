@@ -110,16 +110,22 @@ export default function TrackingScreen() {
     const fgRes = await startForegroundLocation();
     if (fgRes.ok) {
       serviceActiveRef.current = true;
-    } else {
-      console.warn('[tracking] foreground service start failed:', fgRes.reason);
+    } else if (fgRes.code === 'permission') {
+      // Thực sự thiếu quyền → hướng dẫn cấp "Luôn cho phép".
+      console.warn('[tracking] foreground service: missing permission');
       Alert.alert(
-        'Không bật được giám sát nền',
-        `${fgRes.reason ?? 'Lỗi không xác định'}.\n\nVào Cài đặt → Ứng dụng → deviceTracking → Quyền → Vị trí → chọn "Luôn cho phép".`,
+        'Chưa cấp quyền vị trí',
+        'Vào Cài đặt → Ứng dụng → deviceTracking → Quyền → Vị trí → chọn "Luôn cho phép".',
         [
           { text: 'Mở Cài đặt', onPress: () => Linking.openSettings() },
           { text: 'Bỏ qua' },
         ],
       );
+    } else {
+      // Lỗi khởi động native (vd NPE SharedPreferences sau khi retry hết) —
+      // KHÔNG phải lỗi quyền. Không nhắc cấp quyền để khỏi gây hiểu nhầm; tự
+      // thử lại ở lần app trở lại foreground.
+      console.warn('[tracking] foreground service start failed:', fgRes.reason);
     }
     return true;
   }, [storedData, hasPermission, requestPermission, startWatching]);

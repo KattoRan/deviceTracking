@@ -469,10 +469,14 @@ let activityUnsubscribe: (() => void) | null = null;
  * - timeInterval: 60s fallback heartbeat khi đứng yên không trigger distance event
  * - Khi activity thay đổi → re-register với params mới (qua setOptions native)
  */
-export async function startForegroundLocation(): Promise<{ ok: boolean; reason?: string }> {
+export async function startForegroundLocation(): Promise<{
+  ok: boolean;
+  reason?: string;
+  code?: 'permission' | 'start_failed';
+}> {
   const fg = await Location.getForegroundPermissionsAsync();
   if (fg.status !== 'granted') {
-    return { ok: false, reason: 'Chưa cấp quyền vị trí' };
+    return { ok: false, reason: 'Chưa cấp quyền vị trí', code: 'permission' };
   }
 
   // Bật Activity Recognition để adaptive distanceInterval. Có thể fail trên
@@ -499,10 +503,13 @@ export async function startForegroundLocation(): Promise<{ ok: boolean; reason?:
   });
 
   const initial = getCurrentActivity();
-  return applyLocationParams(
+  const res = await applyLocationParams(
     DISTANCE_BY_ACTIVITY[initial],
     TIME_BY_ACTIVITY[initial],
   );
+  // applyLocationParams fail = lỗi khởi động native (vd NPE SharedPreferences),
+  // KHÔNG phải lỗi quyền — gắn code để UI hiển thị đúng thông báo.
+  return res.ok ? res : { ...res, code: 'start_failed' as const };
 }
 
 /**
@@ -531,33 +538,32 @@ async function applyLocationParams(
     pausesUpdatesAutomatically: false,
     activityType: Location.ActivityType.OtherNavigation,
   };
-  try {
-    await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, opts);
-    currentDistanceInterval = distanceInterval;
-    currentTimeInterval = timeInterval;
-    console.log(`[fg-location] startLocationUpdatesAsync OK distance=${distanceInterval}m time=${timeInterval}ms`);
-    return { ok: true };
-  } catch (err) {
-    // Retry sau khi stop — expo-location đôi khi NPE SharedPreferences nếu
-    // task đã register nhưng state init chưa xong, hoặc process trước crash
-    // để lại pref lock. Stop trước rồi start lại flush state.
-    console.warn(`[fg-location] start failed, retrying after stop:`, err instanceof Error ? err.message : String(err));
-    try {
-      await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
-    } catch { /* ignore — task có thể chưa register */ }
+  // Retry CÓ DELAY tăng dần. NPE SharedPreferences của expo-location là lỗi
+  // timing: module init store bất đồng bộ, nếu start gọi quá sớm (cold start,
+  // headless wake) thì SharedPreferences còn null. Retry tức thì vô dụng vì
+  // rơi vào cùng cửa sổ lỗi — phải CHỜ cho init xong. Delay 0/0.5/1.5/3s.
+  const delays = [0, 500, 1_500, 3_000];
+  let lastMsg = '';
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
     try {
       await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, opts);
       currentDistanceInterval = distanceInterval;
       currentTimeInterval = timeInterval;
-      console.log(`[fg-location] startLocationUpdatesAsync OK (retry) distance=${distanceInterval}m time=${timeInterval}ms`);
+      console.log(`[fg-location] startLocationUpdatesAsync OK (try ${i + 1}) distance=${distanceInterval}m time=${timeInterval}ms`);
       return { ok: true };
-    } catch (retryErr) {
-      const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-      console.error('[fg-location] startLocationUpdatesAsync failed after retry:', msg);
-      logRemote.error('startLocationUpdatesAsync failed', retryErr, { distanceInterval, timeInterval });
-      return { ok: false, reason: msg };
+    } catch (err) {
+      lastMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[fg-location] start failed (try ${i + 1}/${delays.length}):`, lastMsg);
     }
   }
+  console.error('[fg-location] startLocationUpdatesAsync failed after all retries:', lastMsg);
+  logRemote.error('startLocationUpdatesAsync failed', new Error(lastMsg), {
+    distanceInterval,
+    timeInterval,
+    attempts: delays.length,
+  });
+  return { ok: false, reason: lastMsg };
 }
 
 /**
