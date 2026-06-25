@@ -837,13 +837,6 @@ function DevicePopupContent({ device }: { device: Device }) {
           }}
         >
           Nghi ngờ fake GPS
-          {device.gpsBtsDistanceM != null
-            ? ` · cách BTS ${
-                device.gpsBtsDistanceM >= 1000
-                  ? `${(device.gpsBtsDistanceM / 1000).toFixed(1)}km`
-                  : `${device.gpsBtsDistanceM}m`
-              }`
-            : ""}
         </div>
       )}
       {qualityLabel && (

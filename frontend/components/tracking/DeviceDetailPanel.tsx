@@ -301,20 +301,7 @@ export default function DeviceDetailPanel({
                 Nghi ngờ giả mạo GPS
               </p>
               <p className="mt-0.5 text-xs text-red-700">
-                Vị trí GPS cách trạm BTS đang kết nối{" "}
-                <span className="font-semibold">
-                  {device.gpsBtsDistanceM != null
-                    ? formatDistance(device.gpsBtsDistanceM)
-                    : "?"}
-                </span>
-                {device.connectedBts?.range != null && (
-                  <>, vượt quá phạm vi phủ sóng{" "}
-                    <span className="font-semibold">
-                      {formatDistance(device.connectedBts.range)}
-                    </span>
-                  </>
-                )}
-                . Thiết bị có thể đang sử dụng ứng dụng fake GPS.
+                Thiết bị có thể đang sử dụng ứng dụng fake GPS.
               </p>
             </div>
           </div>
