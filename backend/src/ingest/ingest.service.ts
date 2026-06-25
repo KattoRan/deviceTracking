@@ -6,12 +6,11 @@ import {
 } from '@nestjs/common';
 import { BtsService } from '../bts/bts.service';
 import {
-  DEFAULT_BTS_RANGE_M,
   evaluateGeofences,
+  GPS_SPOOF_BUFFER_M,
   haversineMeters,
   LOW_BATTERY_RESET_THRESHOLD,
   LOW_BATTERY_THRESHOLD,
-  SPOOF_RANGE_MULTIPLIER,
 } from '../common/geo.util';
 import { EventsGateway } from '../events/events.gateway';
 import { GeofenceStateService } from '../geofences/geofence-state.service';
@@ -180,11 +179,12 @@ export class IngestService {
       const latestAt = new Date(latest.timestamp);
       const latestQuality = deriveQuality(latest);
 
-      // Spoofing detect (chỉ tier gps). Fake-GPS app đổi OS location nhưng
-      // không đổi cell device đang attach → khoảng cách bất thường = nghi vấn.
+      // Spoofing detect (chỉ tier gps + trạm có range). Fake-GPS app đổi OS
+      // location nhưng không đổi cell device đang attach → vị trí vượt phủ
+      // sóng trạm = nghi vấn. Range trong DB là chuẩn; chỉ bù 25m sai số GPS.
       let spoofingSuspected = false;
       let gpsBtsDistanceM: number | null = null;
-      if (connectedBts && latestQuality === 'gps') {
+      if (connectedBts?.range != null && latestQuality === 'gps') {
         gpsBtsDistanceM = Math.round(
           haversineMeters(
             latest.latitude,
@@ -193,14 +193,14 @@ export class IngestService {
             connectedBts.lon,
           ),
         );
-        const btsRange = connectedBts.range ?? DEFAULT_BTS_RANGE_M;
-        spoofingSuspected = gpsBtsDistanceM > btsRange * SPOOF_RANGE_MULTIPLIER;
+        spoofingSuspected =
+          gpsBtsDistanceM > connectedBts.range + GPS_SPOOF_BUFFER_M;
         if (spoofingSuspected) {
           this.logger.warn(
             `GPS SPOOFING suspected device=${deviceId} ` +
               `gps=(${latest.latitude},${latest.longitude}) ` +
               `bts=(${connectedBts.lat},${connectedBts.lon}) ` +
-              `dist=${gpsBtsDistanceM}m range=${btsRange}m`,
+              `dist=${gpsBtsDistanceM}m range=${connectedBts.range}m`,
           );
         }
       }

@@ -35,12 +35,12 @@ export const LOW_BATTERY_THRESHOLD = 20;
 export const LOW_BATTERY_RESET_THRESHOLD = 25;
 
 /**
- * Spoofing detection — GPS fix được coi là khả nghi nếu cách BTS đang kết
- * nối quá `range * SPOOF_RANGE_MULTIPLIER`. Multiplier 2x cho buffer vì
- * range BTS từ Combain là estimate, có thể lệch.
+ * Spoofing detection — GPS fix khả nghi nếu cách trạm BTS đang kết nối quá
+ * `range + GPS_SPOOF_BUFFER_M`. Coi `range` trong DB là bán kính phủ chuẩn;
+ * buffer 25m bù sai số GPS tier (accuracy ≤ 20m) + 5m margin: nếu vị trí
+ * vượt phủ sóng kể cả khi GPS lệch tối đa thì chắc chắn bất thường.
  */
-export const SPOOF_RANGE_MULTIPLIER = 2;
-export const DEFAULT_BTS_RANGE_M = 2_000;
+export const GPS_SPOOF_BUFFER_M = 25;
 
 /**
  * Geofence eval — trả về zone gần nhất + có nằm trong zone nào không.
