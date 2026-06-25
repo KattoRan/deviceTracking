@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -62,6 +63,40 @@ const PERM_ITEMS: PermItem[] = [
     required: false,
   },
 ];
+
+// Khớp với android.package trong app.json — dùng cho intent data URI.
+const PACKAGE_NAME = 'com.katto.devicetracking';
+
+/**
+ * Mở dialog hệ thống "Cho phép chạy nền không giới hạn". Tắt battery
+ * optimization để OS không Doze-throttle foreground service → tác vụ vị trí
+ * fire đều, giảm gap realtime khi tắt màn hình / đi xe.
+ *
+ * Không check được trạng thái (cần native PowerManager) nên đây là hành động
+ * one-shot, không hiển thị badge ✓/✗. Optional — không chặn luồng onboard.
+ */
+async function requestBatteryExemption(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await IntentLauncher.startActivityAsync(
+      'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+      { data: `package:${PACKAGE_NAME}` },
+    );
+  } catch {
+    // Một số ROM (đặc biệt Trung Quốc) không có intent này → fallback mở
+    // trang battery settings chung để user tự tắt tối ưu.
+    try {
+      await IntentLauncher.startActivityAsync(
+        'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS',
+      );
+    } catch {
+      Alert.alert(
+        'Không mở được cài đặt pin',
+        'Vào Cài đặt → Ứng dụng → deviceTracking → Pin → chọn "Không giới hạn".',
+      );
+    }
+  }
+}
 
 export default function PermissionScreen({ onContinue }: PermissionScreenProps) {
   const [status, setStatus] = useState<Record<PermItem['key'], PermStatus>>({
@@ -237,6 +272,29 @@ export default function PermissionScreen({ onContinue }: PermissionScreenProps) 
         ))}
       </View>
 
+      <View style={styles.batteryCard}>
+        <View style={styles.row}>
+          <Text style={styles.emoji}>🔋</Text>
+          <View style={styles.rowBody}>
+            <View style={styles.rowTitleLine}>
+              <Text style={styles.rowTitle}>Tắt tối ưu pin</Text>
+              <Text style={styles.recommendTag}>Khuyến nghị</Text>
+            </View>
+            <Text style={styles.rowDesc}>
+              Cho phép chạy nền không giới hạn để gửi vị trí ổn định khi tắt
+              màn hình. Không bật, hệ điều hành có thể tạm dừng giám sát.
+            </Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={styles.batteryBtn}
+          onPress={requestBatteryExemption}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.batteryBtnText}>Mở cài đặt pin</Text>
+        </TouchableOpacity>
+      </View>
+
       <TouchableOpacity
         style={[styles.btn, requesting && styles.btnDisabled]}
         onPress={requestAll}
@@ -338,6 +396,34 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   rowDesc: { fontSize: 12, color: '#777', lineHeight: 18 },
+  recommendTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    backgroundColor: '#FB8C00',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  batteryCard: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: 12,
+    padding: 8,
+    marginBottom: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#FFE082',
+  },
+  batteryBtn: {
+    backgroundColor: '#FB8C00',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 4,
+    marginHorizontal: 8,
+    marginBottom: 4,
+  },
+  batteryBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   badgeGranted: {
     fontSize: 22,
     color: '#4CAF50',
