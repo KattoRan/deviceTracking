@@ -99,15 +99,6 @@ export default function MapView({
   // Đồng bộ với popup: mở popup trạm nào thì coverage hiện cho trạm đó.
   const [selectedBtsId, setSelectedBtsId] = useState<number | null>(null);
 
-  // Tick để vùng phủ "GPS lost" tự bật khi qua ngưỡng 60s, không cần đợi
-  // heartbeat tiếp theo về để re-render. Cũng cần thiết cho lúc selectedDevice
-  // không đổi trong khi GPS vừa mới mất.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(t);
-  }, []);
-
   // Khi parent yêu cầu focus 1 BTS (vd user click serving cell trong panel) →
   // fly camera tới trạm + set selectedBtsId để hiện coverage. Parent tạo object
   // literal mới mỗi click nên kể cả cùng BTS, effect vẫn re-fire.
@@ -358,31 +349,6 @@ export default function MapView({
     };
   }, [geoJsonData, selectedBtsId, focusBts]);
 
-  // Coverage auto cho selected device khi đang mất GPS — báo người quản lý
-  // "thiết bị đâu đó trong vùng phủ trạm này". Re-eval mỗi heartbeat (device
-  // prop đổi → memo re-run) nên trong 30s không có heartbeat thì state có thể
-  // stale, chấp nhận được.
-  const GPS_LOST_THRESHOLD_MS = 60_000;
-  const gpsLostCoverage = useMemo<FeatureCollection<Polygon>>(() => {
-    if (!selectedDevice?.connectedBts || !selectedDevice.lastGpsAt)
-      return { type: "FeatureCollection", features: [] };
-    const lastGpsMs = new Date(selectedDevice.lastGpsAt).getTime();
-    if (now - lastGpsMs <= GPS_LOST_THRESHOLD_MS)
-      return { type: "FeatureCollection", features: [] };
-    const bts = selectedDevice.connectedBts;
-    const radius = bts.range && bts.range > 0 ? bts.range : 1000;
-    return {
-      type: "FeatureCollection",
-      features: [
-        metersCircle(bts.lon, bts.lat, radius, {
-          id: bts.id,
-          radius,
-          radio: bts.radio,
-        }),
-      ],
-    };
-  }, [selectedDevice, now]);
-
   const clusterFeatures = useMemo<FeatureCollection<Point>>(() => {
     if (!geoJsonData || !showBts) return { type: "FeatureCollection", features: [] };
     const features = geoJsonData.features
@@ -478,29 +444,6 @@ export default function MapView({
             "line-color": "#16a34a",
             "line-width": 2,
             "line-dasharray": [6, 4],
-            "line-opacity": 0.9,
-          }}
-        />
-      </Source>
-
-      {/* Vùng phủ trạm đang nối khi selected device đang mất GPS — hiện rõ
-          hơn coverage thường để người quản lý thấy ngay "thiết bị đâu đó trong đây". */}
-      <Source id="gps-lost-coverage" type="geojson" data={gpsLostCoverage}>
-        <Layer
-          id="gps-lost-coverage-fill"
-          type="fill"
-          paint={{
-            "fill-color": "#f59e0b",
-            "fill-opacity": 0.18,
-          }}
-        />
-        <Layer
-          id="gps-lost-coverage-line"
-          type="line"
-          paint={{
-            "line-color": "#d97706",
-            "line-width": 2.5,
-            "line-dasharray": [4, 3],
             "line-opacity": 0.9,
           }}
         />
