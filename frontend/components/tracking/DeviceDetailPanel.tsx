@@ -17,7 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { formatCoord, formatDateTime, formatDistance } from "@/lib/utils";
+import { formatCoord, formatDateTime } from "@/lib/utils";
 import deviceService from "@/services/deviceService";
 import type {
   Activity,
@@ -123,33 +123,6 @@ export default function DeviceDetailPanel({
   const signal = signalLevel(signalDbm);
   const isOnline = (detail?.status ?? device.status) === "online";
 
-  // Tick mỗi 15s để badge "GPS mất N phút" cập nhật mà không phụ thuộc
-  // heartbeat đến (heartbeat đến mới rerender — nhưng GPS lost còn được tính
-  // ngay cả khi heartbeat chưa kịp đến).
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(t);
-  }, []);
-  // Coi là "mất GPS" khi fix GPS cuối > 90s và device vẫn online. Threshold
-  // 90s = 3× heartbeat interval (30s) để tránh false positive: lastFixAt đầu
-  // tiên đến từ socket có thể đã ~60s tuổi nếu page vừa load giữa chu kỳ.
-  const GPS_LOST_THRESHOLD_MS = 90_000;
-  const gpsLostMs =
-    isOnline && device.lastGpsAt
-      ? Math.max(0, now - new Date(device.lastGpsAt).getTime())
-      : 0;
-  const isGpsLost = gpsLostMs > GPS_LOST_THRESHOLD_MS;
-  const gpsLostLabel = (() => {
-    if (!isGpsLost) return null;
-    const sec = Math.floor(gpsLostMs / 1000);
-    if (sec < 60) return `${sec}s`;
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min} phút`;
-    const hr = Math.floor(min / 60);
-    return `${hr} giờ ${min % 60} phút`;
-  })();
-
   // Danh sách trạm kết nối — ưu tiên dữ liệu realtime từ socket (`device.cellTowers`).
   // Khi chưa có socket update (mới mở panel), fallback về single serving cell
   // từ `detail.cell` để user vẫn thấy thông tin ngay thay vì list rỗng.
@@ -234,47 +207,8 @@ export default function DeviceDetailPanel({
               {servingCell?.type || detail?.cell?.type}
             </span>
           )}
-          {isGpsLost && (
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-              GPS mất {gpsLostLabel}
-            </span>
-          )}
         </div>
       </div>
-
-      {isGpsLost && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
-            <div>
-              <p className="text-sm font-semibold text-amber-800">
-                Mất tín hiệu GPS {gpsLostLabel}
-              </p>
-              <p className="mt-0.5 text-xs text-amber-700">
-                Vị trí marker là điểm GPS cuối cùng nhận được. Thiết bị vẫn còn
-                hoạt động và đang kết nối
-                {device.connectedBts ? (
-                  <>
-                    {" "}trạm{" "}
-                    <span className="font-semibold">
-                      #{device.connectedBts.id}
-                    </span>
-                    {device.connectedBts.range != null && (
-                      <>
-                        {" "}(bán kính phủ ~
-                        {formatDistance(device.connectedBts.range)})
-                      </>
-                    )}
-                    — khả năng cao đang trong vùng phủ sóng của trạm này.
-                  </>
-                ) : (
-                  <> mạng di động.</>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {device.activity && device.activity !== "UNKNOWN" && (
         <div className="border-b border-slate-100 px-4 py-2.5">
